@@ -113,17 +113,23 @@
           </div>
         </section>
 
-        <section class="panel debug-panel">
-          <div class="panel-header">
-            <h2>Debug Bundle</h2>
-            <div class="button-row">
-              <button class="copy-button" type="button" data-copy-target="debug-output">Copy debug</button>
-              <button class="copy-button" type="button" data-copy-target="json-output">Copy JSON</button>
+        <details class="panel debug-panel">
+          <summary>
+            <span>Debug Bundle</span>
+            <span class="summary-hint">Open debug tools</span>
+          </summary>
+          <div class="debug-content">
+            <div class="panel-header">
+              <h2>Debug Bundle</h2>
+              <div class="button-row">
+                <button class="copy-button" type="button" data-copy-target="debug-output">Copy debug</button>
+                <button class="copy-button" type="button" data-copy-target="json-output">Copy JSON</button>
+              </div>
             </div>
+            <textarea id="debug-output" readonly spellcheck="false" placeholder="Debug summary will appear after analysis."></textarea>
+            <textarea id="json-output" readonly spellcheck="false" placeholder="Raw backend JSON will appear here."></textarea>
           </div>
-          <textarea id="debug-output" readonly spellcheck="false" placeholder="Debug summary will appear after analysis."></textarea>
-          <textarea id="json-output" readonly spellcheck="false" placeholder="Raw backend JSON will appear here."></textarea>
-        </section>
+        </details>
       </section>
     </main>
 

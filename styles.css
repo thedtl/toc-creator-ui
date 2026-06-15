@@ -367,12 +367,63 @@ td input {
 }
 
 .debug-panel {
+  display: block;
+}
+
+.debug-panel summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+  color: var(--dtl-blue);
+  font-weight: 700;
+  list-style: none;
+}
+
+.debug-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.debug-panel summary::before {
+  content: "+";
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  border: 1px solid var(--dtl-blue);
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+}
+
+.debug-panel[open] summary {
+  margin-bottom: 18px;
+}
+
+.debug-panel[open] summary::before {
+  content: "-";
+}
+
+.summary-hint {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.debug-content {
+  display: none;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.debug-panel[open] .debug-content {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
 }
 
-.debug-panel .panel-header {
+.debug-content .panel-header {
   grid-column: span 2;
   margin-bottom: 0;
 }
@@ -412,14 +463,14 @@ textarea {
   .source-grid,
   .workspace,
   .metadata-grid,
-  .debug-panel {
+  .debug-content {
     grid-template-columns: 1fr;
   }
 
   .source-panel,
   .results-panel,
-  .debug-panel,
-  .debug-panel .panel-header,
+  .debug-content,
+  .debug-content .panel-header,
   .title-field {
     grid-column: span 1;
   }
