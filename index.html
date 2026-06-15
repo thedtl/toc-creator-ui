@@ -4,8 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>DTL ToC Creator</title>
-    <link rel="stylesheet" href="./styles.css?v=20260615-debug-collapse">
-    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <link rel="stylesheet" href="./styles.css?v=20260615-pdf-preview">
+    <script src="./vendor/pdf-lib.min.js?v=1.17.1"></script>
+    <script src="./vendor/pdf.min.js?v=3.11.174"></script>
   </head>
   <body>
     <main>
@@ -85,6 +86,28 @@
           </ol>
         </section>
 
+        <section class="panel preview-panel">
+          <div class="panel-header">
+            <h2>PDF Preview</h2>
+            <div class="button-row">
+              <button id="load-preview" class="outline-button" type="button">Load preview</button>
+              <a id="open-source" class="copy-button source-link disabled-link" href="#" target="_blank" rel="noopener">Open source</a>
+            </div>
+          </div>
+          <div class="preview-toolbar">
+            <button id="preview-prev" class="outline-button" type="button" disabled>Previous</button>
+            <label class="inline-label" for="preview-page">Page</label>
+            <input id="preview-page" type="number" min="1" value="1" disabled>
+            <span class="page-total">of <strong id="preview-page-count">0</strong></span>
+            <button id="preview-next" class="outline-button" type="button" disabled>Next</button>
+            <span id="preview-status" class="preview-status">Paste a Dropbox link and load preview.</span>
+          </div>
+          <div id="preview-frame" class="preview-frame">
+            <canvas id="preview-canvas" hidden></canvas>
+            <div id="preview-empty" class="preview-empty">PDF preview will appear here.</div>
+          </div>
+        </section>
+
         <section class="panel results-panel">
           <div class="panel-header">
             <h2>Detected Bookmarks</h2>
@@ -105,7 +128,7 @@
                   <th>Title</th>
                   <th>Page</th>
                   <th>Level</th>
-                  <th></th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody id="entries-body"></tbody>
@@ -137,6 +160,6 @@
       <p>The Digital Theological Library. Built for fast ToC debugging and bookmark creation.</p>
     </footer>
 
-    <script src="./app.js?v=20260615-debug-collapse"></script>
+    <script src="./app.js?v=20260615-pdf-preview"></script>
   </body>
 </html>

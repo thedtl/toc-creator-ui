@@ -4,9 +4,17 @@ const state = {
   pdfUrl: "",
   analysis: null,
   startedAt: null,
+  previewDoc: null,
+  previewPage: 1,
+  previewPageCount: 0,
 };
 
 const WORKER_URL = "https://dtl-chapter-request.ccrawford.workers.dev";
+const PDFJS_WORKER_URL = "./vendor/pdf.worker.min.js?v=3.11.174";
+
+if (window.pdfjsLib) {
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+}
 
 const $ = (id) => document.getElementById(id);
 
@@ -31,6 +39,16 @@ const els = {
   title: $("work-title"),
   oclc: $("oclc"),
   healthCheck: $("health-check"),
+  loadPreview: $("load-preview"),
+  openSource: $("open-source"),
+  previewPrev: $("preview-prev"),
+  previewNext: $("preview-next"),
+  previewPage: $("preview-page"),
+  previewPageCount: $("preview-page-count"),
+  previewStatus: $("preview-status"),
+  previewFrame: $("preview-frame"),
+  previewCanvas: $("preview-canvas"),
+  previewEmpty: $("preview-empty"),
 };
 
 function addProgress(message) {
@@ -132,6 +150,32 @@ function setAccessStatus(text, kind = "neutral") {
   els.accessStatus.className = `status-pill ${kind}`;
 }
 
+function setPreviewStatus(text, kind = "neutral") {
+  els.previewStatus.textContent = text;
+  els.previewStatus.className = `preview-status ${kind}`;
+}
+
+function updatePreviewControls() {
+  const ready = Boolean(state.previewDoc && state.previewPageCount);
+  els.previewPage.disabled = !ready;
+  els.previewPrev.disabled = !ready || state.previewPage <= 1;
+  els.previewNext.disabled = !ready || state.previewPage >= state.previewPageCount;
+  els.previewPageCount.textContent = String(state.previewPageCount || 0);
+  els.previewPage.max = state.previewPageCount || 1;
+  els.previewPage.value = String(state.previewPage || 1);
+}
+
+function updateSourceLink() {
+  const rawUrl = els.url.value.trim();
+  if (!rawUrl) {
+    els.openSource.href = "#";
+    els.openSource.classList.add("disabled-link");
+    return;
+  }
+  els.openSource.href = normalizeDropboxUrl(rawUrl);
+  els.openSource.classList.remove("disabled-link");
+}
+
 function getStaffPassword() {
   return els.staffPassword.value;
 }
@@ -205,6 +249,97 @@ async function fetchPdfBytes(url) {
   return buffer;
 }
 
+async function destroyPreviewDoc() {
+  if (state.previewDoc) {
+    try {
+      await state.previewDoc.destroy();
+    } catch {
+      // PDF.js cleanup can fail after a partially loaded document; replacement can continue.
+    }
+  }
+  state.previewDoc = null;
+}
+
+async function resetPreview(message = "Paste a Dropbox link and load preview.") {
+  await destroyPreviewDoc();
+  state.previewPage = 1;
+  state.previewPageCount = 0;
+  els.previewCanvas.hidden = true;
+  els.previewEmpty.hidden = false;
+  setPreviewStatus(message);
+  updatePreviewControls();
+}
+
+async function renderPreviewPage(pageNumber) {
+  if (!state.previewDoc) throw new Error("Load the PDF preview first.");
+  const safePage = Math.max(1, Math.min(state.previewPageCount, parseInt(pageNumber, 10) || 1));
+  state.previewPage = safePage;
+  updatePreviewControls();
+  setPreviewStatus(`Rendering page ${safePage}...`);
+
+  const page = await state.previewDoc.getPage(safePage);
+  const baseViewport = page.getViewport({ scale: 1 });
+  const availableWidth = Math.max(320, els.previewFrame.clientWidth - 36);
+  const scale = Math.max(0.45, Math.min(1.65, availableWidth / baseViewport.width));
+  const viewport = page.getViewport({ scale });
+  const outputScale = window.devicePixelRatio || 1;
+  const canvas = els.previewCanvas;
+  const context = canvas.getContext("2d");
+
+  canvas.width = Math.floor(viewport.width * outputScale);
+  canvas.height = Math.floor(viewport.height * outputScale);
+  canvas.style.width = `${Math.floor(viewport.width)}px`;
+  canvas.style.height = `${Math.floor(viewport.height)}px`;
+  context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+  context.clearRect(0, 0, viewport.width, viewport.height);
+
+  await page.render({ canvasContext: context, viewport }).promise;
+  els.previewCanvas.hidden = false;
+  els.previewEmpty.hidden = true;
+  setPreviewStatus(`Showing page ${safePage} of ${state.previewPageCount}.`, "ok");
+  updatePreviewControls();
+}
+
+async function loadPreviewDocument(targetPage = 1) {
+  const normalizedUrl = normalizeDropboxUrl(els.url.value.trim());
+  if (!normalizedUrl) throw new Error("Paste a Dropbox PDF link first.");
+  if (!window.pdfjsLib) throw new Error("PDF preview library did not load.");
+
+  state.pdfUrl = normalizedUrl;
+  state.pdfName = filenameFromUrl(normalizedUrl);
+  inferMetadataFromName(state.pdfName);
+  updateSourceLink();
+
+  setPreviewStatus("Loading PDF preview...");
+  els.loadPreview.disabled = true;
+  try {
+    if (!state.pdfBytes) {
+      addProgress("Downloading PDF for preview...");
+      state.pdfBytes = await fetchPdfBytes(state.pdfUrl);
+    }
+
+    await destroyPreviewDoc();
+    const loadingTask = window.pdfjsLib.getDocument({
+      data: state.pdfBytes.slice(0),
+      disableRange: true,
+      disableStream: true,
+    });
+    state.previewDoc = await loadingTask.promise;
+    state.previewPageCount = state.previewDoc.numPages;
+    await renderPreviewPage(targetPage);
+    addProgress(`PDF preview loaded (${state.previewPageCount} pages).`);
+  } finally {
+    els.loadPreview.disabled = false;
+  }
+}
+
+async function ensurePreviewDocument() {
+  if (!state.previewDoc) {
+    await loadPreviewDocument();
+  }
+  return state.previewDoc;
+}
+
 async function analyzeSource() {
   const password = requireStaffPassword();
   const normalizedUrl = normalizeDropboxUrl(els.url.value.trim());
@@ -238,11 +373,31 @@ function addEntryRow(entry = {}) {
     <td><input class="entry-title" type="text"></td>
     <td class="page-cell"><input class="entry-page" type="text"></td>
     <td class="level-cell"><input class="entry-level" type="number" min="0" step="1"></td>
-    <td><button class="remove-row" type="button" aria-label="Remove row">x</button></td>
+    <td class="row-actions">
+      <button class="preview-row" type="button">Preview</button>
+      <button class="remove-row" type="button" aria-label="Remove row">x</button>
+    </td>
   `;
   row.querySelector(".entry-title").value = entry.title || "";
   row.querySelector(".entry-page").value = entry.page || "";
   row.querySelector(".entry-level").value = Number.isFinite(entry.level) ? entry.level : (entry.level || 0);
+  row.querySelector(".preview-row").addEventListener("click", async () => {
+    try {
+      await ensurePreviewDocument();
+      const rowEntry = {
+        title: row.querySelector(".entry-title").value.trim(),
+        page: row.querySelector(".entry-page").value.trim(),
+        level: parseInt(row.querySelector(".entry-level").value || "0", 10) || 0,
+      };
+      const pageIndex = entryToPageIndex(rowEntry, state.analysis, state.previewPageCount);
+      if (pageIndex < 0) throw new Error(`Could not map "${rowEntry.page}" to a PDF page.`);
+      await renderPreviewPage(pageIndex + 1);
+      addProgress(`Previewing "${rowEntry.title || "row"}" at PDF page ${pageIndex + 1}.`);
+    } catch (error) {
+      setPreviewStatus(error.message, "error");
+      addProgress(`Preview error: ${error.message}`);
+    }
+  });
   row.querySelector(".remove-row").addEventListener("click", () => {
     row.remove();
     updateEntryCount();
@@ -306,8 +461,9 @@ async function ensurePdfBytes() {
 async function createBookmarkedPdf() {
   const entries = getEntriesFromTable();
   if (!entries.length) throw new Error("No bookmark rows are available.");
+  if (!window.PDFLib) throw new Error("PDF creation library did not load. Refresh the page and try again.");
   const pdfBytes = await ensurePdfBytes();
-  const { PDFDocument, PDFHexString, PDFName } = PDFLib;
+  const { PDFDocument, PDFHexString, PDFName } = window.PDFLib;
   const pdfDoc = await PDFDocument.load(pdfBytes);
   const pageCount = pdfDoc.getPageCount();
   const validEntries = entries
@@ -392,6 +548,7 @@ async function runAnalysis(event) {
     state.pdfUrl = normalizedUrl;
     state.pdfName = filenameFromUrl(normalizedUrl);
     state.pdfBytes = null;
+    await resetPreview("Preview reset for the new Dropbox link.");
     inferMetadataFromName(state.pdfName);
 
     state.analysis = await analyzeSource();
@@ -438,6 +595,9 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   els.url.addEventListener("input", () => {
+    state.pdfBytes = null;
+    resetPreview("Preview reset for the updated Dropbox link.");
+    updateSourceLink();
     const name = filenameFromUrl(els.url.value.trim());
     if (name && name !== "document.pdf") {
       state.pdfName = name;
@@ -447,6 +607,34 @@ document.addEventListener("DOMContentLoaded", () => {
 
   els.form.addEventListener("submit", runAnalysis);
   els.healthCheck.addEventListener("click", checkAccess);
+  els.loadPreview.addEventListener("click", async () => {
+    try {
+      await loadPreviewDocument();
+    } catch (error) {
+      setPreviewStatus(error.message, "error");
+      addProgress(`Preview error: ${error.message}`);
+    }
+  });
+  els.previewPrev.addEventListener("click", () => {
+    renderPreviewPage(state.previewPage - 1).catch((error) => {
+      setPreviewStatus(error.message, "error");
+    });
+  });
+  els.previewNext.addEventListener("click", () => {
+    renderPreviewPage(state.previewPage + 1).catch((error) => {
+      setPreviewStatus(error.message, "error");
+    });
+  });
+  els.previewPage.addEventListener("change", () => {
+    renderPreviewPage(els.previewPage.value).catch((error) => {
+      setPreviewStatus(error.message, "error");
+    });
+  });
+  els.openSource.addEventListener("click", (event) => {
+    if (els.openSource.classList.contains("disabled-link")) {
+      event.preventDefault();
+    }
+  });
 
   els.addEntry.addEventListener("click", () => {
     addEntryRow({ title: "", page: "", level: 0 });
@@ -486,4 +674,6 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   updateFilenamePreview();
+  updateSourceLink();
+  updatePreviewControls();
 });

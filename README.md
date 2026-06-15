@@ -8,13 +8,14 @@ creation, and easy copy/paste debugging.
 
 ## Features
 
-- Dropbox PDF link submission to the ToC backend
-- local PDF fallback for debugging
+- Dropbox PDF link submission through the protected staff Worker
+- staff-password check before running ToC analysis
+- protected PDF preview with page navigation
 - editable detected bookmark table
+- row-level preview buttons for detected bookmarks
 - client-side bookmarked PDF creation with `pdf-lib`
 - filename preview in the pattern `Last, First, Title, OCLC number`
 - copyable progress log, backend JSON, and compact debug bundle
-- optional bearer-token and PDF-proxy fields for private/backend testing
 
 ## Local Use
 
@@ -30,18 +31,20 @@ http://localhost:8000
 
 ## Backend
 
-Default backend:
+The UI calls the shared DTL Cloudflare Worker:
 
 ```text
-https://toc-service-4s2ll3m6pa-uc.a.run.app
+https://dtl-chapter-request.ccrawford.workers.dev
 ```
 
-If Cloud Run is private, paste a short-lived bearer token in Connection
-settings while testing locally. For public GitHub Pages use, the backend will
-need to be callable from the browser.
+The Worker validates the staff password and forwards ToC analysis requests to
+Cloud Run. Direct Cloud Run analysis calls are also protected by the same staff
+password header.
 
 ## Notes
 
-Dropbox links are normalized to `dl=1`. Browser CORS can still block direct PDF
-downloads for client-side bookmark creation; if that happens, configure a small
-PDF proxy in Connection settings or use the local PDF fallback.
+Dropbox links are normalized to `dl=1`. PDF preview and bookmarked-PDF creation
+download the source PDF through the existing protected Worker token route.
+
+The browser PDF libraries are vendored under `vendor/` so the GitHub Pages app
+does not depend on third-party CDN script loading at runtime.
