@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>DTL ToC Creator</title>
+    <link rel="stylesheet" href="./styles.css">
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href="#" aria-label="The DTL">
+          <span class="brand-mark" aria-hidden="true"><span></span><span></span></span>
+          <span>THE DTL</span>
+        </a>
+        <nav class="top-nav" aria-label="DTL links">
+          <a href="https://thedtl.org" target="_blank" rel="noreferrer">The DTL</a>
+          <a href="https://thedtl.org/support" target="_blank" rel="noreferrer">DTL Support</a>
+          <a href="https://oatd.org" target="_blank" rel="noreferrer">Search OADTL</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="tool-hero" aria-labelledby="page-title">
+        <div class="hero-frame">
+          <h1 id="page-title">DTL ToC Creator</h1>
+          <p class="hero-copy">
+            Create PDF bookmarks from a Dropbox link, review the detected entries,
+            and keep a clean debug trail for backend tuning.
+          </p>
+
+          <form id="toc-form" class="source-grid">
+            <div class="input-stack source-input">
+              <label for="pdf-url">Dropbox PDF link</label>
+              <input id="pdf-url" name="pdf-url" type="url" autocomplete="off" placeholder="https://www.dropbox.com/scl/fi/.../Book.pdf?dl=0">
+            </div>
+            <button class="primary-action" type="submit">Analyze link</button>
+          </form>
+
+          <div class="secondary-row">
+            <label class="file-picker">
+              <span>Or choose a local PDF</span>
+              <input id="pdf-file" type="file" accept="application/pdf,.pdf">
+            </label>
+            <button id="health-check" class="link-button" type="button">Check backend</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="book-bars" aria-hidden="true"></div>
+
+      <section class="workspace" aria-label="ToC creator workspace">
+        <section class="panel source-panel">
+          <div class="panel-header">
+            <h2>Source And File Name</h2>
+            <span id="backend-status" class="status-pill neutral">Backend not checked</span>
+          </div>
+
+          <div class="metadata-grid">
+            <div class="input-stack">
+              <label for="author-last">Last name</label>
+              <input id="author-last" type="text" placeholder="Barth">
+            </div>
+            <div class="input-stack">
+              <label for="author-first">First name</label>
+              <input id="author-first" type="text" placeholder="Karl">
+            </div>
+            <div class="input-stack title-field">
+              <label for="work-title">Title</label>
+              <input id="work-title" type="text" placeholder="Church Dogmatics">
+            </div>
+            <div class="input-stack">
+              <label for="oclc">OCLC number</label>
+              <input id="oclc" type="text" inputmode="numeric" placeholder="123456789">
+            </div>
+          </div>
+
+          <div class="filename-box">
+            <div>
+              <span class="eyebrow">Output filename</span>
+              <strong id="filename-preview">Untitled (bookmarked).pdf</strong>
+            </div>
+            <button class="copy-button" type="button" data-copy-target="filename-preview">Copy</button>
+          </div>
+
+          <details class="advanced">
+            <summary>Connection settings</summary>
+            <div class="settings-grid">
+              <div class="input-stack">
+                <label for="backend-url">Backend URL</label>
+                <input id="backend-url" type="url" value="https://toc-service-4s2ll3m6pa-uc.a.run.app">
+              </div>
+              <div class="input-stack">
+                <label for="bearer-token">Bearer token, optional</label>
+                <input id="bearer-token" type="password" autocomplete="off" placeholder="Paste only for private Cloud Run testing">
+              </div>
+              <div class="input-stack">
+                <label for="proxy-url">PDF proxy URL, optional</label>
+                <input id="proxy-url" type="url" placeholder="https://example-worker/?url=">
+              </div>
+            </div>
+          </details>
+        </section>
+
+        <section class="panel progress-panel">
+          <div class="panel-header">
+            <h2>Progress</h2>
+            <button class="copy-button" type="button" data-copy-target="progress-log">Copy log</button>
+          </div>
+          <ol id="progress-log" class="progress-log">
+            <li>Ready for a Dropbox link or local PDF.</li>
+          </ol>
+        </section>
+
+        <section class="panel results-panel">
+          <div class="panel-header">
+            <h2>Detected Bookmarks</h2>
+            <div class="button-row">
+              <button id="add-entry" class="outline-button" type="button">Add row</button>
+              <button id="create-pdf" class="primary-action small" type="button" disabled>Create PDF</button>
+            </div>
+          </div>
+          <div class="summary-strip">
+            <span><strong id="entry-count">0</strong> entries</span>
+            <span>Alignment: <strong id="alignment-status">not run</strong></span>
+            <span id="download-state">No output yet</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Page</th>
+                  <th>Level</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="entries-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel debug-panel">
+          <div class="panel-header">
+            <h2>Debug Bundle</h2>
+            <div class="button-row">
+              <button class="copy-button" type="button" data-copy-target="debug-output">Copy debug</button>
+              <button class="copy-button" type="button" data-copy-target="json-output">Copy JSON</button>
+            </div>
+          </div>
+          <textarea id="debug-output" readonly spellcheck="false" placeholder="Debug summary will appear after analysis."></textarea>
+          <textarea id="json-output" readonly spellcheck="false" placeholder="Raw backend JSON will appear here."></textarea>
+        </section>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>The Digital Theological Library. Built for fast ToC debugging and bookmark creation.</p>
+    </footer>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
