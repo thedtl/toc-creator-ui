@@ -10,6 +10,7 @@ creation, and easy copy/paste debugging.
 
 - Dropbox PDF link submission through the protected staff Worker
 - staff-password check before running ToC analysis
+- live backend progress polling while analysis runs
 - protected PDF preview with page navigation
 - editable detected bookmark table
 - row-level preview buttons for detected bookmarks
@@ -40,6 +41,10 @@ https://dtl-chapter-request.ccrawford.workers.dev
 The Worker validates the staff password and forwards ToC analysis requests to
 Cloud Run. Direct Cloud Run analysis calls are also protected by the same staff
 password header.
+
+Analysis runs as a backend job: the UI starts the job through the Worker, then
+polls the Worker for job status and real backend progress messages until the
+result is ready.
 
 ## Notes
 

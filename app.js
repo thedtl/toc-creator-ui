@@ -3,6 +3,8 @@ const state = {
   pdfName: "",
   pdfUrl: "",
   analysis: null,
+  analysisJobId: null,
+  lastProgressCount: 0,
   startedAt: null,
   previewDoc: null,
   previewPage: 1,
@@ -11,6 +13,8 @@ const state = {
 
 const WORKER_URL = "https://dtl-chapter-request.ccrawford.workers.dev";
 const PDFJS_WORKER_URL = "./vendor/pdf.worker.min.js?v=3.11.174";
+const JOB_POLL_INTERVAL_MS = 2500;
+const JOB_TIMEOUT_MS = 13 * 60 * 1000;
 
 if (window.pdfjsLib) {
   window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
@@ -60,7 +64,34 @@ function addProgress(message) {
 
 function resetProgress(message) {
   els.progressLog.innerHTML = "";
+  state.lastProgressCount = 0;
   addProgress(message);
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function syncProgressMessages(messages = []) {
+  if (!Array.isArray(messages)) return;
+  messages.slice(state.lastProgressCount).forEach((message) => addProgress(message));
+  state.lastProgressCount = Math.max(state.lastProgressCount, messages.length);
+}
+
+function elapsedSeconds() {
+  if (!state.startedAt) return 0;
+  return Math.max(0, Math.round((Date.now() - state.startedAt.getTime()) / 1000));
+}
+
+function updateJobStatusText(status) {
+  const label = status === "succeeded"
+    ? "Analysis complete"
+    : status === "failed"
+      ? "Analysis failed"
+      : status === "queued"
+        ? "Queued"
+        : "Analyzing";
+  els.downloadState.textContent = `${label} (${elapsedSeconds()}s)`;
 }
 
 function normalizeDropboxUrl(url) {
@@ -340,15 +371,14 @@ async function ensurePreviewDocument() {
   return state.previewDoc;
 }
 
-async function analyzeSource() {
+async function startAnalysisJob() {
   const password = requireStaffPassword();
   const normalizedUrl = normalizeDropboxUrl(els.url.value.trim());
   if (!normalizedUrl) throw new Error("Paste a Dropbox PDF link first.");
   state.pdfUrl = normalizedUrl;
   state.pdfName = filenameFromUrl(normalizedUrl);
 
-  state.startedAt = new Date();
-  const response = await fetch(`${WORKER_URL}/toc/analyze`, {
+  const response = await fetch(`${WORKER_URL}/toc/jobs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -359,6 +389,50 @@ async function analyzeSource() {
     }),
   });
   return parseJsonResponse(response, "Worker");
+}
+
+async function getAnalysisJob(jobId) {
+  const password = requireStaffPassword();
+  const response = await fetch(`${WORKER_URL}/toc/job-status`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password, job_id: jobId }),
+  });
+  return parseJsonResponse(response, "Worker");
+}
+
+async function analyzeSource() {
+  state.startedAt = new Date();
+  addProgress("Starting protected analysis job...");
+  const started = await startAnalysisJob();
+  state.analysisJobId = started.job_id;
+  if (!state.analysisJobId) throw new Error("Worker did not return a job ID.");
+
+  syncProgressMessages(started.progress || []);
+  updateJobStatusText(started.status || "queued");
+
+  const deadline = Date.now() + JOB_TIMEOUT_MS;
+  let latest = started;
+  while (Date.now() < deadline) {
+    if (latest.status === "succeeded") {
+      syncProgressMessages(latest.progress || []);
+      updateJobStatusText("succeeded");
+      if (!latest.result) throw new Error("Analysis job finished without a result.");
+      return latest.result;
+    }
+    if (latest.status === "failed") {
+      syncProgressMessages(latest.progress || []);
+      updateJobStatusText("failed");
+      throw new Error(latest.error || "Analysis job failed.");
+    }
+
+    await delay(JOB_POLL_INTERVAL_MS);
+    latest = await getAnalysisJob(state.analysisJobId);
+    syncProgressMessages(latest.progress || []);
+    updateJobStatusText(latest.status || "running");
+  }
+
+  throw new Error("Analysis timed out while waiting for job status.");
 }
 
 function setEntries(entries) {
@@ -540,14 +614,15 @@ function refreshDebug() {
 
 async function runAnalysis(event) {
   event?.preventDefault();
-  resetProgress("Submitting PDF through protected worker...");
+  resetProgress("Preparing PDF analysis...");
   els.createPdf.disabled = true;
-  els.downloadState.textContent = "Analyzing";
+  els.downloadState.textContent = "Starting";
   try {
     const normalizedUrl = normalizeDropboxUrl(els.url.value.trim());
     state.pdfUrl = normalizedUrl;
     state.pdfName = filenameFromUrl(normalizedUrl);
     state.pdfBytes = null;
+    state.analysisJobId = null;
     await resetPreview("Preview reset for the new Dropbox link.");
     inferMetadataFromName(state.pdfName);
 
@@ -557,7 +632,7 @@ async function runAnalysis(event) {
     els.downloadState.textContent = "Ready to create PDF";
     els.createPdf.disabled = false;
     addProgress(`Analysis complete: ${getEntriesFromTable().length} entries.`);
-    (state.analysis.progress || []).forEach((message) => addProgress(message));
+    syncProgressMessages(state.analysis.progress || []);
   } catch (error) {
     els.downloadState.textContent = "Analysis failed";
     addProgress(`Error: ${error.message}`);
