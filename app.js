@@ -2,7 +2,6 @@ const state = {
   pdfBytes: null,
   pdfName: "",
   pdfUrl: "",
-  source: "url",
   analysis: null,
   startedAt: null,
 };
@@ -12,7 +11,6 @@ const $ = (id) => document.getElementById(id);
 const els = {
   form: $("toc-form"),
   url: $("pdf-url"),
-  file: $("pdf-file"),
   backendUrl: $("backend-url"),
   bearerToken: $("bearer-token"),
   proxyUrl: $("proxy-url"),
@@ -174,16 +172,11 @@ async function analyzeSource() {
   form.append("max_pages", "100");
   form.append("skip_bookmarks", "false");
 
-  if (state.source === "file") {
-    if (!state.pdfBytes) throw new Error("Choose a PDF file first.");
-    form.append("pdf_file", new Blob([state.pdfBytes], { type: "application/pdf" }), state.pdfName || "document.pdf");
-  } else {
-    const normalizedUrl = normalizeDropboxUrl(els.url.value.trim());
-    if (!normalizedUrl) throw new Error("Paste a Dropbox PDF link first.");
-    state.pdfUrl = normalizedUrl;
-    state.pdfName = filenameFromUrl(normalizedUrl);
-    form.append("pdf_url", normalizedUrl);
-  }
+  const normalizedUrl = normalizeDropboxUrl(els.url.value.trim());
+  if (!normalizedUrl) throw new Error("Paste a Dropbox PDF link first.");
+  state.pdfUrl = normalizedUrl;
+  state.pdfName = filenameFromUrl(normalizedUrl);
+  form.append("pdf_url", normalizedUrl);
 
   state.startedAt = new Date();
   const response = await fetch(`${base}/analyze-pdf-ai`, {
@@ -274,7 +267,7 @@ function entryToPageIndex(entry, analysis, pageCount) {
 
 async function ensurePdfBytes() {
   if (state.pdfBytes) return state.pdfBytes;
-  if (!state.pdfUrl) throw new Error("The PDF bytes are not loaded yet. Re-run analysis or choose a local file.");
+  if (!state.pdfUrl) throw new Error("The PDF bytes are not loaded yet. Re-run analysis with a Dropbox link.");
   addProgress("Downloading PDF for bookmark creation...");
   state.pdfBytes = await fetchPdfBytes(state.pdfUrl);
   return state.pdfBytes;
@@ -335,7 +328,7 @@ function buildDebugBundle() {
   const analysis = state.analysis || {};
   const entries = getEntriesFromTable();
   return [
-    `source=${state.source}`,
+    "source=dropbox_url",
     `pdf_name=${state.pdfName || ""}`,
     `pdf_url=${state.pdfUrl || ""}`,
     `backend=${els.backendUrl.value.trim()}`,
@@ -365,35 +358,12 @@ async function runAnalysis(event) {
   els.createPdf.disabled = true;
   els.downloadState.textContent = "Analyzing";
   try {
-    state.source = "url";
     const normalizedUrl = normalizeDropboxUrl(els.url.value.trim());
     state.pdfUrl = normalizedUrl;
     state.pdfName = filenameFromUrl(normalizedUrl);
+    state.pdfBytes = null;
     inferMetadataFromName(state.pdfName);
 
-    state.analysis = await analyzeSource();
-    setEntries(state.analysis.entries || []);
-    els.alignmentStatus.textContent = `${state.analysis.alignment_source || "unknown"} / ${state.analysis.alignment_confidence || "unknown"}`;
-    els.downloadState.textContent = "Ready to create PDF";
-    els.createPdf.disabled = false;
-    addProgress(`Analysis complete: ${getEntriesFromTable().length} entries.`);
-    (state.analysis.progress || []).forEach((message) => addProgress(message));
-  } catch (error) {
-    els.downloadState.textContent = "Analysis failed";
-    addProgress(`Error: ${error.message}`);
-  } finally {
-    refreshDebug();
-  }
-}
-
-async function useLocalFile(file) {
-  resetProgress(`Loaded local PDF: ${file.name}`);
-  state.source = "file";
-  state.pdfName = file.name;
-  state.pdfUrl = "";
-  state.pdfBytes = await file.arrayBuffer();
-  inferMetadataFromName(file.name);
-  try {
     state.analysis = await analyzeSource();
     setEntries(state.analysis.entries || []);
     els.alignmentStatus.textContent = `${state.analysis.alignment_source || "unknown"} / ${state.analysis.alignment_confidence || "unknown"}`;
@@ -430,12 +400,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   els.form.addEventListener("submit", runAnalysis);
   els.healthCheck.addEventListener("click", checkBackend);
-
-  els.file.addEventListener("change", async (event) => {
-    const [file] = event.target.files || [];
-    if (!file) return;
-    await useLocalFile(file);
-  });
 
   els.addEntry.addEventListener("click", () => {
     addEntryRow({ title: "", page: "", level: 0 });

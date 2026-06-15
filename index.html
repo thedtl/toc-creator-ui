@@ -8,20 +8,6 @@
     <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
   </head>
   <body>
-    <header class="site-header">
-      <div class="header-inner">
-        <a class="brand" href="#" aria-label="The DTL">
-          <span class="brand-mark" aria-hidden="true"><span></span><span></span></span>
-          <span>THE DTL</span>
-        </a>
-        <nav class="top-nav" aria-label="DTL links">
-          <a href="https://thedtl.org" target="_blank" rel="noreferrer">The DTL</a>
-          <a href="https://thedtl.org/support" target="_blank" rel="noreferrer">DTL Support</a>
-          <a href="https://oatd.org" target="_blank" rel="noreferrer">Search OADTL</a>
-        </nav>
-      </div>
-    </header>
-
     <main>
       <section class="tool-hero" aria-labelledby="page-title">
         <div class="hero-frame">
@@ -40,10 +26,6 @@
           </form>
 
           <div class="secondary-row">
-            <label class="file-picker">
-              <span>Or choose a local PDF</span>
-              <input id="pdf-file" type="file" accept="application/pdf,.pdf">
-            </label>
             <button id="health-check" class="link-button" type="button">Check backend</button>
           </div>
         </div>
@@ -110,7 +92,7 @@
             <button class="copy-button" type="button" data-copy-target="progress-log">Copy log</button>
           </div>
           <ol id="progress-log" class="progress-log">
-            <li>Ready for a Dropbox link or local PDF.</li>
+            <li>Ready for a Dropbox link.</li>
           </ol>
         </section>
 
