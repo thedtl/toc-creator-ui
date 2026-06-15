@@ -6,15 +6,16 @@ const state = {
   startedAt: null,
 };
 
+const WORKER_URL = "https://dtl-chapter-request.ccrawford.workers.dev";
+
 const $ = (id) => document.getElementById(id);
 
 const els = {
   form: $("toc-form"),
   url: $("pdf-url"),
-  backendUrl: $("backend-url"),
-  bearerToken: $("bearer-token"),
-  proxyUrl: $("proxy-url"),
-  backendStatus: $("backend-status"),
+  staffPassword: $("staff-password"),
+  passwordSaved: $("password-saved"),
+  accessStatus: $("access-status"),
   progressLog: $("progress-log"),
   entriesBody: $("entries-body"),
   entryCount: $("entry-count"),
@@ -126,35 +127,73 @@ function updateFilenamePreview() {
   els.filenamePreview.textContent = buildOutputFilename();
 }
 
-function setBackendStatus(text, kind = "neutral") {
-  els.backendStatus.textContent = text;
-  els.backendStatus.className = `status-pill ${kind}`;
+function setAccessStatus(text, kind = "neutral") {
+  els.accessStatus.textContent = text;
+  els.accessStatus.className = `status-pill ${kind}`;
 }
 
-function requestHeaders() {
-  const token = els.bearerToken.value.trim();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+function getStaffPassword() {
+  return els.staffPassword.value;
 }
 
-async function checkBackend() {
-  setBackendStatus("Checking...", "neutral");
-  const base = els.backendUrl.value.replace(/\/+$/, "");
+function requireStaffPassword() {
+  const password = getStaffPassword();
+  if (!password) {
+    els.staffPassword.focus();
+    throw new Error("Enter the staff password first.");
+  }
+  return password;
+}
+
+async function parseJsonResponse(response, context) {
+  const text = await response.text();
+  let data;
   try {
-    const response = await fetch(`${base}/health`, { headers: requestHeaders() });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const text = await response.text();
-    setBackendStatus("Backend ready", "ok");
-    addProgress(`Backend health ok: ${text.slice(0, 100)}`);
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(`${context} returned non-JSON response: ${text.slice(0, 200)}`);
+  }
+  if (!response.ok) {
+    throw new Error(data.detail || data.error || `HTTP ${response.status}`);
+  }
+  return data;
+}
+
+async function checkAccess() {
+  setAccessStatus("Checking...", "neutral");
+  try {
+    const password = requireStaffPassword();
+    const response = await fetch(`${WORKER_URL}/toc/health`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    await parseJsonResponse(response, "Worker");
+    setAccessStatus("Access ready", "ok");
+    addProgress("Staff password accepted.");
   } catch (error) {
-    setBackendStatus("Backend check failed", "error");
-    addProgress(`Backend health failed: ${error.message}`);
+    setAccessStatus("Access failed", "error");
+    addProgress(`Access check failed: ${error.message}`);
   }
 }
 
+async function getProtectedPdfUrl(dropboxUrl) {
+  const password = requireStaffPassword();
+  const params = new URLSearchParams({
+    password,
+    dropbox: normalizeDropboxUrl(dropboxUrl),
+    start: "1",
+    end: "99999",
+    expires: "0",
+  });
+  const response = await fetch(`${WORKER_URL}/sign?${params.toString()}`);
+  const data = await parseJsonResponse(response, "PDF proxy");
+  if (!data.token) throw new Error("PDF proxy did not return a token.");
+  return `${WORKER_URL}/?token=${encodeURIComponent(data.token)}`;
+}
+
 async function fetchPdfBytes(url) {
-  const normalized = normalizeDropboxUrl(url);
-  const proxy = els.proxyUrl.value.trim();
-  const downloadUrl = proxy ? `${proxy}${encodeURIComponent(normalized)}` : normalized;
+  const downloadUrl = await getProtectedPdfUrl(url);
   const response = await fetch(downloadUrl);
   if (!response.ok) throw new Error(`PDF download failed: HTTP ${response.status}`);
   const contentType = response.headers.get("content-type") || "";
@@ -167,33 +206,24 @@ async function fetchPdfBytes(url) {
 }
 
 async function analyzeSource() {
-  const base = els.backendUrl.value.replace(/\/+$/, "");
-  const form = new FormData();
-  form.append("max_pages", "100");
-  form.append("skip_bookmarks", "false");
-
+  const password = requireStaffPassword();
   const normalizedUrl = normalizeDropboxUrl(els.url.value.trim());
   if (!normalizedUrl) throw new Error("Paste a Dropbox PDF link first.");
   state.pdfUrl = normalizedUrl;
   state.pdfName = filenameFromUrl(normalizedUrl);
-  form.append("pdf_url", normalizedUrl);
 
   state.startedAt = new Date();
-  const response = await fetch(`${base}/analyze-pdf-ai`, {
+  const response = await fetch(`${WORKER_URL}/toc/analyze`, {
     method: "POST",
-    headers: requestHeaders(),
-    body: form,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      password,
+      pdf_url: normalizedUrl,
+      max_pages: 100,
+      skip_bookmarks: false,
+    }),
   });
-
-  const text = await response.text();
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    throw new Error(`Backend returned non-JSON response: ${text.slice(0, 200)}`);
-  }
-  if (!response.ok) throw new Error(data.detail || data.error || `HTTP ${response.status}`);
-  return data;
+  return parseJsonResponse(response, "Worker");
 }
 
 function setEntries(entries) {
@@ -331,7 +361,7 @@ function buildDebugBundle() {
     "source=dropbox_url",
     `pdf_name=${state.pdfName || ""}`,
     `pdf_url=${state.pdfUrl || ""}`,
-    `backend=${els.backendUrl.value.trim()}`,
+    `worker=${WORKER_URL}`,
     `output_filename=${buildOutputFilename()}`,
     `started_at=${state.startedAt ? state.startedAt.toISOString() : ""}`,
     `entries=${entries.length}`,
@@ -354,7 +384,7 @@ function refreshDebug() {
 
 async function runAnalysis(event) {
   event?.preventDefault();
-  resetProgress("Submitting PDF to backend...");
+  resetProgress("Submitting PDF through protected worker...");
   els.createPdf.disabled = true;
   els.downloadState.textContent = "Analyzing";
   try {
@@ -386,8 +416,25 @@ async function copyTextFromTarget(targetId) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  const savedPassword = sessionStorage.getItem("dtl_staff_password");
+  if (savedPassword) {
+    els.staffPassword.value = savedPassword;
+    els.passwordSaved.hidden = false;
+  }
+
   [els.authorLast, els.authorFirst, els.title, els.oclc].forEach((input) => {
     input.addEventListener("input", updateFilenamePreview);
+  });
+
+  els.staffPassword.addEventListener("change", () => {
+    if (els.staffPassword.value) {
+      sessionStorage.setItem("dtl_staff_password", els.staffPassword.value);
+      els.passwordSaved.hidden = false;
+    } else {
+      sessionStorage.removeItem("dtl_staff_password");
+      els.passwordSaved.hidden = true;
+      setAccessStatus("Access not checked", "neutral");
+    }
   });
 
   els.url.addEventListener("input", () => {
@@ -399,7 +446,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   els.form.addEventListener("submit", runAnalysis);
-  els.healthCheck.addEventListener("click", checkBackend);
+  els.healthCheck.addEventListener("click", checkAccess);
 
   els.addEntry.addEventListener("click", () => {
     addEntryRow({ title: "", page: "", level: 0 });

@@ -81,10 +81,10 @@ button:disabled {
 
 .source-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(180px, 0.42fr) minmax(0, 1fr) auto;
   gap: 12px;
   align-items: end;
-  max-width: 850px;
+  max-width: 980px;
   margin: 0 auto;
 }
 
@@ -98,6 +98,17 @@ label,
   font-size: 13px;
   font-weight: 700;
   color: #20242b;
+}
+
+.saved-note {
+  display: inline-flex;
+  margin-left: 8px;
+  color: var(--success);
+  font-size: 12px;
+}
+
+.saved-note[hidden] {
+  display: none;
 }
 
 input,
@@ -223,8 +234,7 @@ textarea:focus {
   font-size: 22px;
 }
 
-.metadata-grid,
-.settings-grid {
+.metadata-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
@@ -251,21 +261,6 @@ textarea:focus {
   display: block;
   margin-top: 3px;
   overflow-wrap: anywhere;
-}
-
-.advanced {
-  margin-top: 18px;
-}
-
-.advanced summary {
-  cursor: pointer;
-  color: var(--dtl-blue);
-  font-weight: 700;
-}
-
-.settings-grid {
-  margin-top: 14px;
-  grid-template-columns: 1.4fr 1fr 1.2fr;
 }
 
 .status-pill {
@@ -417,7 +412,6 @@ textarea {
   .source-grid,
   .workspace,
   .metadata-grid,
-  .settings-grid,
   .debug-panel {
     grid-template-columns: 1fr;
   }

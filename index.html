@@ -18,6 +18,13 @@
           </p>
 
           <form id="toc-form" class="source-grid">
+            <div class="input-stack password-input">
+              <label for="staff-password">
+                Staff password
+                <span id="password-saved" class="saved-note" hidden>Saved</span>
+              </label>
+              <input id="staff-password" type="password" autocomplete="current-password" placeholder="Enter staff password">
+            </div>
             <div class="input-stack source-input">
               <label for="pdf-url">Dropbox PDF link</label>
               <input id="pdf-url" name="pdf-url" type="url" autocomplete="off" placeholder="https://www.dropbox.com/scl/fi/.../Book.pdf?dl=0">
@@ -26,7 +33,7 @@
           </form>
 
           <div class="secondary-row">
-            <button id="health-check" class="link-button" type="button">Check backend</button>
+            <button id="health-check" class="link-button" type="button">Check password</button>
           </div>
         </div>
       </section>
@@ -37,7 +44,7 @@
         <section class="panel source-panel">
           <div class="panel-header">
             <h2>Source And File Name</h2>
-            <span id="backend-status" class="status-pill neutral">Backend not checked</span>
+            <span id="access-status" class="status-pill neutral">Access not checked</span>
           </div>
 
           <div class="metadata-grid">
@@ -66,24 +73,6 @@
             </div>
             <button class="copy-button" type="button" data-copy-target="filename-preview">Copy</button>
           </div>
-
-          <details class="advanced">
-            <summary>Connection settings</summary>
-            <div class="settings-grid">
-              <div class="input-stack">
-                <label for="backend-url">Backend URL</label>
-                <input id="backend-url" type="url" value="https://toc-service-4s2ll3m6pa-uc.a.run.app">
-              </div>
-              <div class="input-stack">
-                <label for="bearer-token">Bearer token, optional</label>
-                <input id="bearer-token" type="password" autocomplete="off" placeholder="Paste only for private Cloud Run testing">
-              </div>
-              <div class="input-stack">
-                <label for="proxy-url">PDF proxy URL, optional</label>
-                <input id="proxy-url" type="url" placeholder="https://example-worker/?url=">
-              </div>
-            </div>
-          </details>
         </section>
 
         <section class="panel progress-panel">
@@ -92,7 +81,7 @@
             <button class="copy-button" type="button" data-copy-target="progress-log">Copy log</button>
           </div>
           <ol id="progress-log" class="progress-log">
-            <li>Ready for a Dropbox link.</li>
+            <li>Ready for a staff password and Dropbox link.</li>
           </ol>
         </section>
 
