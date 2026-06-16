@@ -12,6 +12,7 @@ const state = {
   previewAutoloadTimer: null,
   previewLoadId: 0,
   pdfBytesUrl: "",
+  analysisRunId: 0,
 };
 
 const WORKER_URL = "https://dtl-chapter-request.ccrawford.workers.dev";
@@ -20,6 +21,18 @@ const JOB_POLL_INTERVAL_MS = 2500;
 const JOB_TIMEOUT_MS = 45 * 60 * 1000;
 const JOB_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const PREVIEW_AUTOLOAD_DELAY_MS = 650;
+
+function createStaleAnalysisError() {
+  const error = new Error("Analysis was reset.");
+  error.name = "StaleAnalysisRun";
+  return error;
+}
+
+function assertAnalysisRunActive(runId) {
+  if (state.analysisRunId !== runId) {
+    throw createStaleAnalysisError();
+  }
+}
 
 if (window.pdfjsLib) {
   window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
@@ -49,6 +62,7 @@ const els = {
   mmsId: $("mms-id"),
   oclc: $("oclc"),
   healthCheck: $("health-check"),
+  stopAnalysis: $("stop-analysis"),
   resetTool: $("reset-tool"),
   loadPreview: $("load-preview"),
   openSource: $("open-source"),
@@ -95,9 +109,13 @@ function updateJobStatusText(status) {
     ? "Analysis complete"
     : status === "failed"
       ? "Analysis failed"
-      : status === "queued"
-        ? "Queued"
-        : "Analyzing";
+      : status === "cancelled"
+        ? "Analysis stopped"
+        : status === "cancel_requested"
+          ? "Stopping"
+          : status === "queued"
+            ? "Queued"
+            : "Analyzing";
   els.downloadState.textContent = `${label} (${elapsedSeconds()}s)`;
 }
 
@@ -529,12 +547,28 @@ async function getAnalysisJob(jobId) {
   return parseJsonResponse(response, "Worker");
 }
 
-async function analyzeSource() {
+async function cancelAnalysisJob(jobId) {
+  const password = requireStaffPassword();
+  const response = await fetch(`${WORKER_URL}/toc/job-cancel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password, job_id: jobId }),
+  });
+  return parseJsonResponse(response, "Worker");
+}
+
+async function analyzeSource(runId) {
+  assertAnalysisRunActive(runId);
   state.startedAt = new Date();
   addProgress("Starting protected analysis job...");
   const started = await startAnalysisJob();
-  state.analysisJobId = started.job_id;
-  if (!state.analysisJobId) throw new Error("Worker did not return a job ID.");
+  const jobId = started.job_id;
+  if (!jobId) throw new Error("Worker did not return a job ID.");
+  if (state.analysisRunId !== runId) {
+    await cancelAnalysisJob(jobId).catch(() => {});
+    throw createStaleAnalysisError();
+  }
+  state.analysisJobId = jobId;
 
   syncProgressMessages(started.progress || []);
   updateJobStatusText(started.status || "queued");
@@ -556,9 +590,16 @@ async function analyzeSource() {
       updateJobStatusText("failed");
       throw new Error(latest.error || "Analysis job failed.");
     }
+    if (latest.status === "cancelled") {
+      syncProgressMessages(latest.progress || []);
+      updateJobStatusText("cancelled");
+      throw new Error(latest.error || "Analysis cancelled.");
+    }
 
     await delay(JOB_POLL_INTERVAL_MS);
-    latest = await getAnalysisJob(state.analysisJobId);
+    assertAnalysisRunActive(runId);
+    latest = await getAnalysisJob(jobId);
+    assertAnalysisRunActive(runId);
     const progressCount = Array.isArray(latest.progress) ? latest.progress.length : 0;
     const status = latest.status || "running";
     if (progressCount > lastSeenProgressCount || status !== lastSeenStatus) {
@@ -753,7 +794,44 @@ function refreshDebug() {
   els.jsonOutput.value = state.analysis ? JSON.stringify(state.analysis, null, 2) : "";
 }
 
+async function stopCurrentAnalysis(message = "Stop requested. If a backend job is created, it will be cancelled immediately.") {
+  if (els.stopAnalysis.disabled) return;
+  const jobId = state.analysisJobId;
+  state.analysisRunId += 1;
+  els.stopAnalysis.disabled = true;
+  els.downloadState.textContent = jobId ? "Stopping analysis" : "Analysis stopped";
+  let stopConfirmed = !jobId;
+  if (jobId) {
+    addProgress("Stop requested. Asking backend to cancel this analysis job...");
+    try {
+      const cancelled = await cancelAnalysisJob(jobId);
+      syncProgressMessages(cancelled.progress || []);
+      updateJobStatusText(cancelled.status || "cancel_requested");
+      addProgress("Stop request sent. The backend will not start another Gemini call for this job.");
+      stopConfirmed = true;
+    } catch (error) {
+      addProgress(`Stop request error: ${error.message}`);
+    }
+  } else {
+    addProgress(message);
+  }
+  state.analysisJobId = null;
+  els.downloadState.textContent = stopConfirmed ? "Analysis stopped" : "Stop request failed";
+  refreshDebug();
+}
+
 async function resetForNextPdf() {
+  const activeJobId = state.analysisJobId;
+  state.analysisRunId += 1;
+  let resetMessage = "Ready for the next Dropbox link.";
+  if (activeJobId) {
+    try {
+      await cancelAnalysisJob(activeJobId);
+      resetMessage = "Ready for the next Dropbox link. Previous analysis stop request sent.";
+    } catch (error) {
+      resetMessage = `Ready for the next Dropbox link. Stop request failed: ${error.message}`;
+    }
+  }
   clearPreviewAutoload();
   state.pdfBytes = null;
   state.pdfBytesUrl = "";
@@ -771,6 +849,7 @@ async function resetForNextPdf() {
   setEntries([]);
   els.alignmentStatus.textContent = "not run";
   els.downloadState.textContent = "No output yet";
+  els.stopAnalysis.disabled = true;
   els.createPdf.disabled = true;
   els.debugOutput.value = "";
   els.jsonOutput.value = "";
@@ -778,15 +857,28 @@ async function resetForNextPdf() {
   updateFilenamePreview();
   updateSourceLink();
   await resetPreview("Paste a Dropbox PDF link to preview it.");
-  resetProgress("Ready for the next Dropbox link.");
+  resetProgress(resetMessage);
 }
 
 async function runAnalysis(event) {
   event?.preventDefault();
+  const previousJobId = state.analysisJobId;
+  const runId = state.analysisRunId + 1;
+  state.analysisRunId = runId;
   resetProgress("Preparing PDF analysis...");
+  if (previousJobId) {
+    try {
+      await cancelAnalysisJob(previousJobId);
+      addProgress("Previous analysis stop request sent.");
+    } catch (error) {
+      addProgress(`Previous analysis stop request failed: ${error.message}`);
+    }
+  }
+  els.stopAnalysis.disabled = false;
   els.createPdf.disabled = true;
   els.downloadState.textContent = "Starting";
   try {
+    assertAnalysisRunActive(runId);
     const normalizedUrl = normalizeDropboxUrl(els.url.value.trim());
     const alreadyLoadedSource = state.pdfUrl === normalizedUrl && (state.previewDoc || state.pdfBytesUrl === normalizedUrl);
     state.pdfUrl = normalizedUrl;
@@ -800,18 +892,26 @@ async function runAnalysis(event) {
     schedulePreviewAutoload(0);
     inferMetadataFromName(state.pdfName);
 
-    state.analysis = await analyzeSource();
+    state.analysis = await analyzeSource(runId);
+    assertAnalysisRunActive(runId);
     setEntries(state.analysis.entries || []);
     els.alignmentStatus.textContent = `${state.analysis.alignment_source || "unknown"} / ${state.analysis.alignment_confidence || "unknown"}`;
     els.downloadState.textContent = "Ready to create PDF";
+    els.stopAnalysis.disabled = true;
     els.createPdf.disabled = false;
     addProgress(`Analysis complete: ${getEntriesFromTable().length} entries.`);
     syncProgressMessages(state.analysis.progress || []);
   } catch (error) {
-    els.downloadState.textContent = "Analysis failed";
-    addProgress(`Error: ${error.message}`);
+    if (error.name === "StaleAnalysisRun") return;
+    const wasCancelled = /cancel/i.test(error.message || "");
+    els.downloadState.textContent = wasCancelled ? "Analysis stopped" : "Analysis failed";
+    els.stopAnalysis.disabled = true;
+    addProgress(`${wasCancelled ? "Stopped" : "Error"}: ${error.message}`);
   } finally {
-    refreshDebug();
+    if (state.analysisRunId === runId) {
+      els.stopAnalysis.disabled = true;
+      refreshDebug();
+    }
   }
 }
 
@@ -859,6 +959,11 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   els.form.addEventListener("submit", runAnalysis);
+  els.stopAnalysis.addEventListener("click", () => {
+    stopCurrentAnalysis().catch((error) => {
+      addProgress(`Stop error: ${error.message}`);
+    });
+  });
   els.resetTool.addEventListener("click", () => {
     resetForNextPdf().catch((error) => {
       addProgress(`Reset error: ${error.message}`);
