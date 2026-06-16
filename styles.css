@@ -310,11 +310,23 @@ textarea:focus {
   max-height: 320px;
   overflow: auto;
   margin: 0;
-  padding-left: 22px;
+  padding-left: 0;
+  list-style: none;
+  counter-reset: progress;
 }
 
 .progress-log li {
+  display: grid;
+  grid-template-columns: 4ch minmax(0, 1fr);
+  column-gap: 8px;
   margin: 0 0 9px;
+  counter-increment: progress;
+}
+
+.progress-log li::before {
+  content: counter(progress) ".";
+  color: var(--muted);
+  text-align: right;
 }
 
 .preview-toolbar {
@@ -351,9 +363,9 @@ textarea:focus {
 }
 
 .preview-frame {
-  min-height: 420px;
-  max-height: 760px;
-  overflow: auto;
+  height: min(72vh, 760px);
+  min-height: 520px;
+  overflow: hidden;
   border: 1px solid #ccd5ef;
   border-radius: 8px;
   background:
@@ -366,7 +378,7 @@ textarea:focus {
   background-size: 20px 20px;
   display: flex;
   justify-content: center;
-  align-items: flex-start;
+  align-items: center;
   padding: 18px;
 }
 
@@ -377,9 +389,14 @@ textarea:focus {
   box-shadow: 0 4px 18px rgba(22, 26, 38, 0.18);
 }
 
+#preview-canvas[hidden],
+.preview-empty[hidden] {
+  display: none;
+}
+
 .preview-empty {
   width: 100%;
-  min-height: 380px;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;

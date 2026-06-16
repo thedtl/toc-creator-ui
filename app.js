@@ -9,12 +9,16 @@ const state = {
   previewDoc: null,
   previewPage: 1,
   previewPageCount: 0,
+  previewAutoloadTimer: null,
+  previewLoadId: 0,
+  pdfBytesUrl: "",
 };
 
 const WORKER_URL = "https://dtl-chapter-request.ccrawford.workers.dev";
 const PDFJS_WORKER_URL = "./vendor/pdf.worker.min.js?v=3.11.174";
 const JOB_POLL_INTERVAL_MS = 2500;
 const JOB_TIMEOUT_MS = 13 * 60 * 1000;
+const PREVIEW_AUTOLOAD_DELAY_MS = 650;
 
 if (window.pdfjsLib) {
   window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
@@ -104,6 +108,15 @@ function normalizeDropboxUrl(url) {
     return parsed.toString();
   } catch {
     return url;
+  }
+}
+
+function isPreviewableDropboxPdfUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname.includes("dropbox.com") && parsed.pathname.toLowerCase().includes(".pdf");
+  } catch {
+    return false;
   }
 }
 
@@ -291,7 +304,8 @@ async function destroyPreviewDoc() {
   state.previewDoc = null;
 }
 
-async function resetPreview(message = "Paste a Dropbox link and load preview.") {
+async function resetPreview(message = "Paste a Dropbox PDF link to preview it.") {
+  state.previewLoadId += 1;
   await destroyPreviewDoc();
   state.previewPage = 1;
   state.previewPageCount = 0;
@@ -310,8 +324,12 @@ async function renderPreviewPage(pageNumber) {
 
   const page = await state.previewDoc.getPage(safePage);
   const baseViewport = page.getViewport({ scale: 1 });
-  const availableWidth = Math.max(320, els.previewFrame.clientWidth - 36);
-  const scale = Math.max(0.45, Math.min(1.65, availableWidth / baseViewport.width));
+  const availableWidth = Math.max(280, els.previewFrame.clientWidth - 36);
+  const availableHeight = Math.max(320, els.previewFrame.clientHeight - 36);
+  const scale = Math.max(
+    0.2,
+    Math.min(2, availableWidth / baseViewport.width, availableHeight / baseViewport.height)
+  );
   const viewport = page.getViewport({ scale });
   const outputScale = window.devicePixelRatio || 1;
   const canvas = els.previewCanvas;
@@ -335,6 +353,7 @@ async function loadPreviewDocument(targetPage = 1) {
   const normalizedUrl = normalizeDropboxUrl(els.url.value.trim());
   if (!normalizedUrl) throw new Error("Paste a Dropbox PDF link first.");
   if (!window.pdfjsLib) throw new Error("PDF preview library did not load.");
+  const loadId = ++state.previewLoadId;
 
   state.pdfUrl = normalizedUrl;
   state.pdfName = filenameFromUrl(normalizedUrl);
@@ -344,11 +363,15 @@ async function loadPreviewDocument(targetPage = 1) {
   setPreviewStatus("Loading PDF preview...");
   els.loadPreview.disabled = true;
   try {
-    if (!state.pdfBytes) {
+    if (!state.pdfBytes || state.pdfBytesUrl !== state.pdfUrl) {
       addProgress("Downloading PDF for preview...");
-      state.pdfBytes = await fetchPdfBytes(state.pdfUrl);
+      const pdfBytes = await fetchPdfBytes(state.pdfUrl);
+      if (loadId !== state.previewLoadId) return;
+      state.pdfBytes = pdfBytes;
+      state.pdfBytesUrl = state.pdfUrl;
     }
 
+    if (loadId !== state.previewLoadId) return;
     await destroyPreviewDoc();
     const loadingTask = window.pdfjsLib.getDocument({
       data: state.pdfBytes.slice(0),
@@ -356,6 +379,7 @@ async function loadPreviewDocument(targetPage = 1) {
       disableStream: true,
     });
     state.previewDoc = await loadingTask.promise;
+    if (loadId !== state.previewLoadId) return;
     state.previewPageCount = state.previewDoc.numPages;
     await renderPreviewPage(targetPage);
     addProgress(`PDF preview loaded (${state.previewPageCount} pages).`);
@@ -368,7 +392,38 @@ async function ensurePreviewDocument() {
   if (!state.previewDoc) {
     await loadPreviewDocument();
   }
+  if (!state.previewDoc) throw new Error("PDF preview is still loading. Try again in a moment.");
   return state.previewDoc;
+}
+
+function clearPreviewAutoload() {
+  if (state.previewAutoloadTimer) {
+    clearTimeout(state.previewAutoloadTimer);
+    state.previewAutoloadTimer = null;
+  }
+}
+
+async function autoLoadPreview() {
+  const normalizedUrl = normalizeDropboxUrl(els.url.value.trim());
+  if (!getStaffPassword() || !isPreviewableDropboxPdfUrl(normalizedUrl)) return;
+  if (state.previewDoc && state.pdfUrl === normalizedUrl) return;
+
+  try {
+    await loadPreviewDocument();
+  } catch (error) {
+    setPreviewStatus(error.message, "error");
+    addProgress(`Auto-preview error: ${error.message}`);
+  }
+}
+
+function schedulePreviewAutoload(delay = PREVIEW_AUTOLOAD_DELAY_MS) {
+  clearPreviewAutoload();
+  const normalizedUrl = normalizeDropboxUrl(els.url.value.trim());
+  if (!getStaffPassword() || !isPreviewableDropboxPdfUrl(normalizedUrl)) return;
+  state.previewAutoloadTimer = setTimeout(() => {
+    state.previewAutoloadTimer = null;
+    autoLoadPreview();
+  }, delay);
 }
 
 async function startAnalysisJob() {
@@ -619,11 +674,16 @@ async function runAnalysis(event) {
   els.downloadState.textContent = "Starting";
   try {
     const normalizedUrl = normalizeDropboxUrl(els.url.value.trim());
+    const alreadyLoadedSource = state.pdfUrl === normalizedUrl && (state.previewDoc || state.pdfBytesUrl === normalizedUrl);
     state.pdfUrl = normalizedUrl;
     state.pdfName = filenameFromUrl(normalizedUrl);
-    state.pdfBytes = null;
+    if (!alreadyLoadedSource) {
+      state.pdfBytes = null;
+      state.pdfBytesUrl = "";
+      await resetPreview("Loading preview while analysis runs.");
+    }
     state.analysisJobId = null;
-    await resetPreview("Preview reset for the new Dropbox link.");
+    schedulePreviewAutoload(0);
     inferMetadataFromName(state.pdfName);
 
     state.analysis = await analyzeSource();
@@ -667,17 +727,21 @@ document.addEventListener("DOMContentLoaded", () => {
       els.passwordSaved.hidden = true;
       setAccessStatus("Access not checked", "neutral");
     }
+    schedulePreviewAutoload();
   });
 
   els.url.addEventListener("input", () => {
+    clearPreviewAutoload();
     state.pdfBytes = null;
-    resetPreview("Preview reset for the updated Dropbox link.");
+    state.pdfBytesUrl = "";
+    resetPreview("Loading preview for the updated Dropbox link.");
     updateSourceLink();
     const name = filenameFromUrl(els.url.value.trim());
     if (name && name !== "document.pdf") {
       state.pdfName = name;
       inferMetadataFromName(name);
     }
+    schedulePreviewAutoload();
   });
 
   els.form.addEventListener("submit", runAnalysis);
