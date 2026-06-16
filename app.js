@@ -17,7 +17,8 @@ const state = {
 const WORKER_URL = "https://dtl-chapter-request.ccrawford.workers.dev";
 const PDFJS_WORKER_URL = "./vendor/pdf.worker.min.js?v=3.11.174";
 const JOB_POLL_INTERVAL_MS = 2500;
-const JOB_TIMEOUT_MS = 13 * 60 * 1000;
+const JOB_TIMEOUT_MS = 45 * 60 * 1000;
+const JOB_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const PREVIEW_AUTOLOAD_DELAY_MS = 650;
 
 if (window.pdfjsLib) {
@@ -468,6 +469,9 @@ async function analyzeSource() {
   updateJobStatusText(started.status || "queued");
 
   const deadline = Date.now() + JOB_TIMEOUT_MS;
+  let lastActivityAt = Date.now();
+  let lastSeenProgressCount = Array.isArray(started.progress) ? started.progress.length : 0;
+  let lastSeenStatus = started.status || "queued";
   let latest = started;
   while (Date.now() < deadline) {
     if (latest.status === "succeeded") {
@@ -484,11 +488,21 @@ async function analyzeSource() {
 
     await delay(JOB_POLL_INTERVAL_MS);
     latest = await getAnalysisJob(state.analysisJobId);
+    const progressCount = Array.isArray(latest.progress) ? latest.progress.length : 0;
+    const status = latest.status || "running";
+    if (progressCount > lastSeenProgressCount || status !== lastSeenStatus) {
+      lastActivityAt = Date.now();
+      lastSeenProgressCount = progressCount;
+      lastSeenStatus = status;
+    }
     syncProgressMessages(latest.progress || []);
     updateJobStatusText(latest.status || "running");
+    if (Date.now() - lastActivityAt > JOB_IDLE_TIMEOUT_MS) {
+      throw new Error("Analysis stopped reporting progress for more than 30 minutes. Try again or check backend logs.");
+    }
   }
 
-  throw new Error("Analysis timed out while waiting for job status.");
+  throw new Error("Analysis timed out after 45 minutes while waiting for job status.");
 }
 
 function setEntries(entries) {
