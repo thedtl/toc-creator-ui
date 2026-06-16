@@ -88,6 +88,14 @@ button:disabled {
   margin: 0 auto;
 }
 
+.form-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
 .input-stack {
   display: grid;
   gap: 7px;
@@ -586,6 +594,14 @@ textarea {
   .metadata-grid,
   .debug-content {
     grid-template-columns: 1fr;
+  }
+
+  .form-actions {
+    justify-content: stretch;
+  }
+
+  .form-actions > * {
+    flex: 1 1 140px;
   }
 
   .source-panel,

@@ -47,6 +47,7 @@ const els = {
   title: $("work-title"),
   oclc: $("oclc"),
   healthCheck: $("health-check"),
+  resetTool: $("reset-tool"),
   loadPreview: $("load-preview"),
   openSource: $("open-source"),
   previewPrev: $("preview-prev"),
@@ -667,6 +668,34 @@ function refreshDebug() {
   els.jsonOutput.value = state.analysis ? JSON.stringify(state.analysis, null, 2) : "";
 }
 
+async function resetForNextPdf() {
+  clearPreviewAutoload();
+  state.pdfBytes = null;
+  state.pdfBytesUrl = "";
+  state.pdfName = "";
+  state.pdfUrl = "";
+  state.analysis = null;
+  state.analysisJobId = null;
+  state.lastProgressCount = 0;
+  state.startedAt = null;
+
+  els.url.value = "";
+  [els.authorLast, els.authorFirst, els.title, els.oclc].forEach((input) => {
+    input.value = "";
+  });
+  setEntries([]);
+  els.alignmentStatus.textContent = "not run";
+  els.downloadState.textContent = "No output yet";
+  els.createPdf.disabled = true;
+  els.debugOutput.value = "";
+  els.jsonOutput.value = "";
+  els.loadPreview.disabled = false;
+  updateFilenamePreview();
+  updateSourceLink();
+  await resetPreview("Paste a Dropbox PDF link to preview it.");
+  resetProgress("Ready for the next Dropbox link.");
+}
+
 async function runAnalysis(event) {
   event?.preventDefault();
   resetProgress("Preparing PDF analysis...");
@@ -745,6 +774,11 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   els.form.addEventListener("submit", runAnalysis);
+  els.resetTool.addEventListener("click", () => {
+    resetForNextPdf().catch((error) => {
+      addProgress(`Reset error: ${error.message}`);
+    });
+  });
   els.healthCheck.addEventListener("click", checkAccess);
   els.loadPreview.addEventListener("click", async () => {
     try {
