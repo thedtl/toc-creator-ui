@@ -46,6 +46,7 @@ const els = {
   authorLast: $("author-last"),
   authorFirst: $("author-first"),
   title: $("work-title"),
+  mmsId: $("mms-id"),
   oclc: $("oclc"),
   healthCheck: $("health-check"),
   resetTool: $("reset-tool"),
@@ -147,26 +148,94 @@ function filenameFromUrl(url) {
   }
 }
 
+function stripBookmarkedSuffix(value) {
+  return (value || "")
+    .replace(/\s*\[bookmarked\]\s*$/i, "")
+    .replace(/\s*\(bookmarked\)\s*$/i, "")
+    .trim();
+}
+
+function normalizeIdentifier(value) {
+  return cleanFilenamePart(value)
+    .replace(/\b(?:mms\s*id|oclc|ocn)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function splitTrailingAuthor(value) {
+  const tokens = (value || "").split(/\s+/).filter(Boolean);
+  if (tokens.length < 3) return null;
+
+  const isInitial = (token) => /^[A-Z]\.?$/i.test(token);
+  const isNamePart = (token) => /^[A-Z][A-Za-z'.-]*$/.test(token);
+  const last = tokens[tokens.length - 1];
+  const prev = tokens[tokens.length - 2];
+  if (!isNamePart(last) || !(isNamePart(prev) || isInitial(prev))) return null;
+
+  let authorStart = tokens.length - 2;
+  if (tokens.length >= 4 && isInitial(prev) && isNamePart(tokens[tokens.length - 3])) {
+    authorStart = tokens.length - 3;
+  }
+
+  const titleTokens = tokens.slice(0, authorStart);
+  if (!titleTokens.length) return null;
+  const authorTokens = tokens.slice(authorStart);
+  return {
+    title: titleTokens.join(" "),
+    first: authorTokens.slice(0, -1).join(" "),
+    last: authorTokens[authorTokens.length - 1],
+  };
+}
+
+function splitTitleAuthor(value) {
+  const cleaned = stripBookmarkedSuffix(value).replace(/\s+/g, " ").trim();
+  const editionMatch = cleaned.match(/^(.*?\b\d+(?:st|nd|rd|th)?\s+ed\.)\s+(.+)$/i);
+  if (editionMatch) {
+    const author = splitTrailingAuthor(`Title ${editionMatch[2]}`);
+    if (author) {
+      return {
+        title: editionMatch[1],
+        first: author.first,
+        last: author.last,
+      };
+    }
+  }
+  return splitTrailingAuthor(cleaned);
+}
+
 function inferMetadataFromName(name) {
-  const base = titleCaseFromSlug(name);
+  const base = stripBookmarkedSuffix(titleCaseFromSlug(name));
   const oclcMatch = base.match(/\b(?:oclc|ocn)?\s*(\d{6,})\b/i);
   if (oclcMatch && !els.oclc.value.trim()) {
     els.oclc.value = oclcMatch[1];
   }
 
-  const withoutOclc = base
+  const afterOclc = oclcMatch ? base.slice(oclcMatch.index + oclcMatch[0].length) : "";
+  const mmsMatch = afterOclc.match(/(?:\bmms\s*id\b)?\s*([A-Z0-9]+(?:\s+[A-Z0-9]+){0,3})\s*$/i);
+  if (mmsMatch && !els.mmsId.value.trim()) {
+    els.mmsId.value = normalizeIdentifier(mmsMatch[1]);
+  }
+
+  const withoutIdentifiers = base
     .replace(/\b(?:oclc|ocn)?\s*\d{6,}\b/i, "")
+    .replace(/\bmms\s*id\b/gi, "")
+    .replace(/\s+\d[A-Z0-9]*(?:\s+[A-Z0-9]+){0,3}\s*$/i, "")
     .replace(/\s+/g, " ")
     .trim();
 
-  if (!els.title.value.trim()) {
-    const commaParts = withoutOclc.split(",").map((part) => part.trim()).filter(Boolean);
-    if (commaParts.length >= 3) {
-      if (!els.authorLast.value.trim()) els.authorLast.value = commaParts[0];
-      if (!els.authorFirst.value.trim()) els.authorFirst.value = commaParts[1];
-      els.title.value = commaParts.slice(2).join(", ");
-    } else {
-      els.title.value = withoutOclc || base || "Untitled";
+  const commaParts = withoutIdentifiers.split(",").map((part) => part.trim()).filter(Boolean);
+  if (commaParts.length >= 3) {
+    if (!els.authorLast.value.trim()) els.authorLast.value = commaParts[0];
+    if (!els.authorFirst.value.trim()) els.authorFirst.value = commaParts[1];
+    if (!els.title.value.trim()) els.title.value = commaParts.slice(2).join(", ");
+  } else {
+    const parsed = splitTitleAuthor(withoutIdentifiers);
+    if (parsed) {
+      if (!els.authorLast.value.trim()) els.authorLast.value = parsed.last;
+      if (!els.authorFirst.value.trim()) els.authorFirst.value = parsed.first;
+      if (!els.title.value.trim()) els.title.value = parsed.title;
+    } else if (!els.title.value.trim()) {
+      els.title.value = withoutIdentifiers || base || "Untitled";
     }
   }
   updateFilenamePreview();
@@ -176,15 +245,17 @@ function buildOutputFilename() {
   const last = cleanFilenamePart(els.authorLast.value);
   const first = cleanFilenamePart(els.authorFirst.value);
   const title = cleanFilenamePart(els.title.value) || cleanFilenamePart(state.pdfName.replace(/\.pdf$/i, "")) || "Untitled";
+  const mmsId = normalizeIdentifier(els.mmsId.value);
   const oclc = cleanFilenamePart(els.oclc.value);
+  const author = last && first ? `${last}, ${first}` : (last || first);
+  const identifiers = [];
+  if (mmsId) identifiers.push(`MMS ID ${mmsId}`);
+  if (oclc) identifiers.push(`OCLC ${oclc}`);
+  const pieces = [author, title, identifiers.join(", ")].filter(Boolean);
+  let base = pieces.join(". ").replace(/\.\s*\./g, ".").trim();
+  base = base.replace(/\s+\./g, ".").replace(/\s+/g, " ");
 
-  const pieces = [];
-  if (last) pieces.push(last);
-  if (first) pieces.push(first);
-  pieces.push(title);
-  if (oclc) pieces.push(`OCLC ${oclc}`);
-
-  return `${pieces.join(", ")}.pdf`;
+  return `${base} [Bookmarked].pdf`;
 }
 
 function updateFilenamePreview() {
@@ -694,7 +765,7 @@ async function resetForNextPdf() {
   state.startedAt = null;
 
   els.url.value = "";
-  [els.authorLast, els.authorFirst, els.title, els.oclc].forEach((input) => {
+  [els.authorLast, els.authorFirst, els.title, els.mmsId, els.oclc].forEach((input) => {
     input.value = "";
   });
   setEntries([]);
@@ -757,7 +828,7 @@ document.addEventListener("DOMContentLoaded", () => {
     els.passwordSaved.hidden = false;
   }
 
-  [els.authorLast, els.authorFirst, els.title, els.oclc].forEach((input) => {
+  [els.authorLast, els.authorFirst, els.title, els.mmsId, els.oclc].forEach((input) => {
     input.addEventListener("input", updateFilenamePreview);
   });
 
