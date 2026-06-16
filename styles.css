@@ -222,11 +222,12 @@ textarea:focus {
 }
 
 .workspace {
-  width: min(1180px, calc(100vw - 48px));
+  width: min(1440px, calc(100vw - 48px));
   margin: 74px auto 90px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1.18fr) minmax(430px, 0.82fr);
   gap: 24px;
+  align-items: stretch;
 }
 
 .panel {
@@ -237,10 +238,16 @@ textarea:focus {
 }
 
 .source-panel,
-.preview-panel,
-.results-panel,
+.progress-panel,
 .debug-panel {
   grid-column: span 2;
+}
+
+.preview-panel,
+.results-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .panel-header {
@@ -371,8 +378,8 @@ textarea:focus {
 }
 
 .preview-frame {
-  height: min(72vh, 760px);
-  min-height: 520px;
+  height: min(68vh, 720px);
+  min-height: 500px;
   overflow: hidden;
   border: 1px solid #ccd5ef;
   border-radius: 8px;
@@ -430,8 +437,10 @@ textarea:focus {
 }
 
 .table-wrap {
+  flex: 1;
   margin-top: 18px;
   overflow: auto;
+  min-height: 220px;
   border: 1px solid #ccd5ef;
   border-radius: 8px;
   background: #fff;
@@ -440,7 +449,8 @@ textarea:focus {
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 720px;
+  table-layout: fixed;
+  min-width: 0;
 }
 
 th,
@@ -457,20 +467,32 @@ th {
   background: #eef2fb;
 }
 
+th:nth-child(2) {
+  width: 96px;
+}
+
+th:nth-child(3) {
+  width: 72px;
+}
+
+th:nth-child(4) {
+  width: 132px;
+}
+
 td input {
   min-height: 36px;
 }
 
 .level-cell {
-  width: 82px;
+  width: 72px;
 }
 
 .page-cell {
-  width: 150px;
+  width: 96px;
 }
 
 .row-actions {
-  width: 150px;
+  width: 132px;
   white-space: nowrap;
 }
 
@@ -576,6 +598,20 @@ textarea {
   font-weight: 700;
 }
 
+@media (max-width: 1100px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .source-panel,
+  .progress-panel,
+  .preview-panel,
+  .results-panel,
+  .debug-panel {
+    grid-column: span 1;
+  }
+}
+
 @media (max-width: 820px) {
   .workspace {
     width: min(100% - 28px, 1180px);
@@ -605,6 +641,7 @@ textarea {
   }
 
   .source-panel,
+  .progress-panel,
   .preview-panel,
   .results-panel,
   .debug-content,
