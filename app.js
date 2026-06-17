@@ -313,8 +313,32 @@ function isPreviewableDropboxPdfUrl(url) {
   }
 }
 
-function cleanFilenamePart(value) {
+function normalizeFilenameText(value) {
   return (value || "")
+    .replace(/[–—―−]/g, " - ")
+    .replace(/[‘’‚‛]/g, "'")
+    .replace(/[“”„‟]/g, '"')
+    .replace(/[ÆǼ]/g, "AE")
+    .replace(/[æǽ]/g, "ae")
+    .replace(/[Œ]/g, "OE")
+    .replace(/[œ]/g, "oe")
+    .replace(/[ÐĐ]/g, "D")
+    .replace(/[ðđ]/g, "d")
+    .replace(/[Þ]/g, "Th")
+    .replace(/[þ]/g, "th")
+    .replace(/[Ł]/g, "L")
+    .replace(/[ł]/g, "l")
+    .replace(/[Ø]/g, "O")
+    .replace(/[ø]/g, "o")
+    .replace(/[ẞ]/g, "SS")
+    .replace(/[ß]/g, "ss")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f\u1ab0-\u1aff\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f]/gi, "")
+    .replace(/[^\x20-\x7e]+/g, " ");
+}
+
+function cleanFilenamePart(value) {
+  return normalizeFilenameText(value)
     .replace(/[\\/:*?"<>|]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
