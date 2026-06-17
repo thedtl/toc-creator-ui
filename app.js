@@ -13,6 +13,8 @@ const state = {
   previewLoadId: 0,
   pdfBytesUrl: "",
   analysisRunId: 0,
+  feedbackOutcome: "",
+  feedbackIssues: [],
 };
 
 const WORKER_URL = "https://dtl-chapter-request.ccrawford.workers.dev";
@@ -73,6 +75,15 @@ const els = {
   previewFrame: $("preview-frame"),
   previewCanvas: $("preview-canvas"),
   previewEmpty: $("preview-empty"),
+  learningRunId: $("learning-run-id"),
+  learningRoute: $("learning-route"),
+  learningTokens: $("learning-tokens"),
+  feedbackState: $("feedback-state"),
+  feedbackOptions: $("feedback-options"),
+  feedbackNote: $("feedback-note"),
+  feedbackIssues: $("feedback-issues"),
+  clearFeedbackIssues: $("clear-feedback-issues"),
+  saveFeedback: $("save-feedback"),
 };
 
 function addProgress(message) {
@@ -112,6 +123,172 @@ function updateJobStatusText(status) {
         ? "Queued"
         : "Analyzing";
   els.downloadState.textContent = `${label} (${elapsedSeconds()}s)`;
+}
+
+function formatNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number.toLocaleString() : "unknown";
+}
+
+function currentRunId() {
+  return state.analysis?.run_id || state.analysisJobId || "";
+}
+
+function routeSummary(analysis = state.analysis) {
+  const progress = Array.isArray(analysis?.progress) ? analysis.progress.join("\n").toLowerCase() : "";
+  if (progress.includes("skipping front toc scan")) return "back first, front skipped";
+  if (progress.includes("toc found in back pages")) return "back ToC";
+  if (progress.includes("toc found in front pages")) return "front ToC";
+  return analysis ? "unknown" : "not run";
+}
+
+function resetFeedbackState() {
+  state.feedbackOutcome = "";
+  state.feedbackIssues = [];
+  if (els.feedbackNote) els.feedbackNote.value = "";
+  if (els.feedbackState) els.feedbackState.textContent = "No feedback saved";
+  document.querySelectorAll("#feedback-options button").forEach((button) => {
+    button.classList.remove("active");
+  });
+  renderFeedbackIssues();
+  updateLearningPanel();
+}
+
+function rowMatchesFeedbackIssue(row, issue) {
+  const title = row.querySelector(".entry-title").value.trim();
+  const currentPage = row.querySelector(".entry-page").value.trim();
+  const originalPage = row.dataset.originalPage || currentPage;
+  return issue.title === title && issue.returned_page === originalPage;
+}
+
+function syncFlagButtons() {
+  document.querySelectorAll("#entries-body tr").forEach((row) => {
+    const flagged = state.feedbackIssues.some((issue) => rowMatchesFeedbackIssue(row, issue));
+    row.querySelector(".flag-row")?.classList.toggle("flagged", flagged);
+  });
+}
+
+function updateLearningPanel() {
+  const analysis = state.analysis;
+  const runId = currentRunId();
+  const usage = analysis?.gemini_usage || {};
+  const totalTokens = usage.tokens?.total_token_count;
+  els.learningRunId.textContent = runId ? runId.slice(0, 12) : "none";
+  els.learningRunId.title = runId || "";
+  els.learningRoute.textContent = routeSummary(analysis);
+  els.learningTokens.textContent = formatNumber(totalTokens);
+  els.saveFeedback.disabled = !runId;
+}
+
+function renderFeedbackIssues() {
+  if (!els.feedbackIssues) return;
+  els.feedbackIssues.innerHTML = "";
+  if (!state.feedbackIssues.length) {
+    const empty = document.createElement("li");
+    empty.className = "empty-issue";
+    empty.textContent = "No rows flagged.";
+    els.feedbackIssues.appendChild(empty);
+    syncFlagButtons();
+    return;
+  }
+
+  state.feedbackIssues.forEach((issue, index) => {
+    const item = document.createElement("li");
+    item.className = "issue-row";
+    item.innerHTML = `
+      <input class="issue-title" type="text" aria-label="Flagged title">
+      <input class="issue-returned" type="text" aria-label="Returned page">
+      <input class="issue-correct" type="text" aria-label="Correct page">
+      <button class="remove-issue" type="button" aria-label="Remove flagged row">x</button>
+    `;
+    item.querySelector(".issue-title").value = issue.title || "";
+    item.querySelector(".issue-returned").value = issue.returned_page || "";
+    item.querySelector(".issue-correct").value = issue.correct_page || "";
+    item.querySelector(".issue-title").addEventListener("input", (event) => {
+      state.feedbackIssues[index].title = event.target.value;
+    });
+    item.querySelector(".issue-returned").addEventListener("input", (event) => {
+      state.feedbackIssues[index].returned_page = event.target.value;
+    });
+    item.querySelector(".issue-correct").addEventListener("input", (event) => {
+      state.feedbackIssues[index].correct_page = event.target.value;
+    });
+    item.querySelector(".remove-issue").addEventListener("click", () => {
+      state.feedbackIssues.splice(index, 1);
+      renderFeedbackIssues();
+      refreshDebug();
+    });
+    els.feedbackIssues.appendChild(item);
+  });
+  syncFlagButtons();
+}
+
+function flagEntryRow(row) {
+  const title = row.querySelector(".entry-title").value.trim();
+  const currentPage = row.querySelector(".entry-page").value.trim();
+  const originalPage = row.dataset.originalPage || currentPage;
+  const existing = state.feedbackIssues.find((issue) => issue.title === title && issue.returned_page === originalPage);
+  if (existing) {
+    existing.correct_page = currentPage;
+  } else {
+    state.feedbackIssues.push({
+      issue_type: "wrong_page",
+      title,
+      returned_page: originalPage,
+      correct_page: currentPage,
+      note: "",
+    });
+  }
+  if (!state.feedbackOutcome) setFeedbackOutcome("wrong_pages");
+  renderFeedbackIssues();
+}
+
+function setFeedbackOutcome(outcome) {
+  state.feedbackOutcome = outcome || "";
+  document.querySelectorAll("#feedback-options button").forEach((button) => {
+    button.classList.toggle("active", button.dataset.outcome === state.feedbackOutcome);
+  });
+}
+
+function feedbackResultSummary() {
+  const analysis = state.analysis || {};
+  const usage = analysis.gemini_usage || {};
+  return {
+    entries: getEntriesFromTable().length,
+    original_entries: Array.isArray(analysis.entries) ? analysis.entries.length : 0,
+    notes: analysis.notes || "",
+    alignment_source: analysis.alignment_source || "",
+    alignment_confidence: analysis.alignment_confidence || "",
+    route: routeSummary(analysis),
+    total_token_count: Number(usage.tokens?.total_token_count || 0),
+    calls: Number(usage.calls || 0),
+    images: Number(usage.images || 0),
+    wall_ms: Number(usage.wall_ms || 0),
+  };
+}
+
+async function saveRunFeedback() {
+  const runId = currentRunId();
+  if (!runId) throw new Error("No completed run is available.");
+  const password = requireStaffPassword();
+  const response = await fetch(`${WORKER_URL}/toc/run-feedback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      password,
+      run_id: runId,
+      outcome: state.feedbackOutcome || (state.feedbackIssues.length ? "wrong_pages" : "good"),
+      note: els.feedbackNote.value.trim(),
+      issues: state.feedbackIssues,
+      edited_entries: getEntriesFromTable(),
+      result_summary: feedbackResultSummary(),
+    }),
+  });
+  const result = await parseJsonResponse(response, "Worker");
+  if (!result.ok) throw new Error(result.error || "Feedback was not saved.");
+  els.feedbackState.textContent = "Feedback saved";
+  addProgress(`Feedback saved for run ${runId.slice(0, 12)}.`);
+  return result;
 }
 
 function normalizeDropboxUrl(url) {
@@ -609,9 +786,12 @@ function addEntryRow(entry = {}) {
     <td class="level-cell"><input class="entry-level" type="number" min="0" step="1"></td>
     <td class="row-actions">
       <button class="preview-row" type="button">Preview</button>
+      <button class="flag-row" type="button">Flag</button>
       <button class="remove-row" type="button" aria-label="Remove row">x</button>
     </td>
   `;
+  row.dataset.originalTitle = entry.title || "";
+  row.dataset.originalPage = entry.page || "";
   row.querySelector(".entry-title").value = entry.title || "";
   row.querySelector(".entry-page").value = entry.page || "";
   row.querySelector(".entry-level").value = Number.isFinite(entry.level) ? entry.level : (entry.level || 0);
@@ -631,6 +811,10 @@ function addEntryRow(entry = {}) {
       setPreviewStatus(error.message, "error");
       addProgress(`Preview error: ${error.message}`);
     }
+  });
+  row.querySelector(".flag-row").addEventListener("click", () => {
+    flagEntryRow(row);
+    refreshDebug();
   });
   row.querySelector(".remove-row").addEventListener("click", () => {
     row.remove();
@@ -747,8 +931,11 @@ async function createBookmarkedPdf() {
 function buildDebugBundle() {
   const analysis = state.analysis || {};
   const entries = getEntriesFromTable();
+  const usage = analysis.gemini_usage || {};
   return [
     "source=dropbox_url",
+    `run_id=${currentRunId()}`,
+    `route=${routeSummary(analysis)}`,
     `pdf_name=${state.pdfName || ""}`,
     `pdf_url=${state.pdfUrl || ""}`,
     `worker=${WORKER_URL}`,
@@ -757,6 +944,9 @@ function buildDebugBundle() {
     `entries=${entries.length}`,
     `alignment_source=${analysis.alignment_source || ""}`,
     `alignment_confidence=${analysis.alignment_confidence || ""}`,
+    `total_token_count=${usage.tokens?.total_token_count || ""}`,
+    `feedback_outcome=${state.feedbackOutcome || ""}`,
+    `flagged_issues=${state.feedbackIssues.length}`,
     `notes=${analysis.notes || ""}`,
     "",
     "progress:",
@@ -795,6 +985,7 @@ async function resetForNextPdf() {
   els.debugOutput.value = "";
   els.jsonOutput.value = "";
   els.loadPreview.disabled = false;
+  resetFeedbackState();
   updateFilenamePreview();
   updateSourceLink();
   await resetPreview("Paste a Dropbox PDF link to preview it.");
@@ -806,6 +997,7 @@ async function runAnalysis(event) {
   const runId = state.analysisRunId + 1;
   state.analysisRunId = runId;
   resetProgress("Preparing PDF analysis...");
+  resetFeedbackState();
   els.createPdf.disabled = true;
   els.downloadState.textContent = "Starting";
   try {
@@ -827,6 +1019,7 @@ async function runAnalysis(event) {
     assertAnalysisRunActive(runId);
     setEntries(state.analysis.entries || []);
     els.alignmentStatus.textContent = `${state.analysis.alignment_source || "unknown"} / ${state.analysis.alignment_confidence || "unknown"}`;
+    updateLearningPanel();
     els.downloadState.textContent = "Ready to create PDF";
     els.createPdf.disabled = false;
     addProgress(`Analysis complete: ${getEntriesFromTable().length} entries.`);
@@ -932,6 +1125,29 @@ document.addEventListener("DOMContentLoaded", () => {
     refreshDebug();
   });
 
+  els.feedbackOptions.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-outcome]");
+    if (!button) return;
+    setFeedbackOutcome(button.dataset.outcome);
+    refreshDebug();
+  });
+
+  els.clearFeedbackIssues.addEventListener("click", () => {
+    state.feedbackIssues = [];
+    renderFeedbackIssues();
+    refreshDebug();
+  });
+
+  els.saveFeedback.addEventListener("click", async () => {
+    els.feedbackState.textContent = "Saving feedback";
+    try {
+      await saveRunFeedback();
+    } catch (error) {
+      els.feedbackState.textContent = "Feedback save failed";
+      addProgress(`Feedback error: ${error.message}`);
+    }
+  });
+
   els.createPdf.addEventListener("click", async () => {
     els.downloadState.textContent = "Creating PDF";
     addProgress("Creating bookmarked PDF in browser...");
@@ -960,5 +1176,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   updateFilenamePreview();
   updateSourceLink();
+  resetFeedbackState();
   updatePreviewControls();
 });

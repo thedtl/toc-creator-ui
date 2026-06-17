@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>DTL ToC Creator</title>
-    <link rel="stylesheet" href="./styles.css?v=20260615-no-stop">
+    <link rel="stylesheet" href="./styles.css?v=20260617-learning">
     <script src="./vendor/pdf-lib.min.js?v=1.17.1"></script>
     <script src="./vendor/pdf.min.js?v=3.11.174"></script>
   </head>
@@ -128,6 +128,12 @@
             <span>Alignment: <strong id="alignment-status">not run</strong></span>
             <span id="download-state">No output yet</span>
           </div>
+          <div class="learning-summary" aria-live="polite">
+            <span>Run: <strong id="learning-run-id">none</strong></span>
+            <span>Route: <strong id="learning-route">not run</strong></span>
+            <span>Tokens: <strong id="learning-tokens">unknown</strong></span>
+            <span id="feedback-state">No feedback saved</span>
+          </div>
           <div class="table-wrap">
             <table>
               <thead>
@@ -140,6 +146,36 @@
               </thead>
               <tbody id="entries-body"></tbody>
             </table>
+          </div>
+          <div class="learning-box">
+            <div class="panel-header compact-header">
+              <h3>Run Notes</h3>
+              <div id="feedback-options" class="segmented-control" role="group" aria-label="Run outcome">
+                <button type="button" data-outcome="good">Good</button>
+                <button type="button" data-outcome="wrong_pages">Wrong pages</button>
+                <button type="button" data-outcome="missed_toc">Missed ToC</button>
+                <button type="button" data-outcome="bad_hierarchy">Bad hierarchy</button>
+                <button type="button" data-outcome="too_expensive">Too expensive</button>
+              </div>
+            </div>
+            <div class="feedback-grid">
+              <div class="input-stack">
+                <label for="feedback-note">Note</label>
+                <textarea id="feedback-note" rows="4" placeholder="Optional note"></textarea>
+              </div>
+              <div class="issue-panel">
+                <div class="issue-header">
+                  <strong>Flagged rows</strong>
+                  <button id="clear-feedback-issues" class="copy-button" type="button">Clear</button>
+                </div>
+                <ul id="feedback-issues" class="feedback-issues">
+                  <li class="empty-issue">No rows flagged.</li>
+                </ul>
+              </div>
+            </div>
+            <div class="learning-actions">
+              <button id="save-feedback" class="primary-action small" type="button" disabled>Save feedback</button>
+            </div>
           </div>
         </section>
 
@@ -167,6 +203,6 @@
       <p>The Digital Theological Library. Built for fast ToC debugging and bookmark creation.</p>
     </footer>
 
-    <script src="./app.js?v=20260615-no-stop"></script>
+    <script src="./app.js?v=20260617-learning"></script>
   </body>
 </html>
