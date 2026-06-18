@@ -479,10 +479,12 @@ function extractFilenameIdentifiers(value) {
 
 function inferMetadataFromName(name) {
   const inferred = extractFilenameIdentifiers(name);
-  setMetadataField("oclc", inferred.oclc);
-  setMetadataField("mmsId", inferred.mmsId);
-  setMetadataField("sourceCode", inferred.sourceCode);
+  const applied = [];
+  if (setMetadataField("oclc", inferred.oclc)) applied.push("OCLC");
+  if (setMetadataField("mmsId", inferred.mmsId)) applied.push("MMS ID");
+  if (setMetadataField("sourceCode", inferred.sourceCode)) applied.push("source code");
   updateFilenamePreview();
+  return applied;
 }
 
 function buildOutputFilename() {
@@ -878,10 +880,12 @@ async function suggestMetadataForSource(normalizedUrl, runId) {
 
   const metadata = data.suggested_metadata || {};
   state.metadataSuggestion = metadata;
+  const identifierFields = metadata.error ? [] : inferMetadataFromName(state.pdfName);
   const applied = applyMetadataSuggestion(metadata);
   const page = metadata.evidence_page ? ` page ${metadata.evidence_page}` : "";
-  if (applied.length) {
-    addProgress(`Applied ${applied.join(" and ")} from metadata scan${page}.`);
+  const appliedFields = [...identifierFields, ...applied];
+  if (appliedFields.length) {
+    addProgress(`Applied ${appliedFields.join(" and ")} from metadata scan${page}.`);
   } else {
     addProgress("Metadata scan did not find confident title/author fields to apply.");
   }
@@ -1197,7 +1201,6 @@ async function runAnalysis(event) {
     }
     state.analysisJobId = null;
     schedulePreviewAutoload(0);
-    inferMetadataFromName(state.pdfName);
     const metadataPromise = suggestMetadataForSource(normalizedUrl, runId).catch((error) => {
       if (error.name !== "StaleAnalysisRun") {
         addProgress(`Metadata scan skipped: ${error.message}`);
