@@ -381,7 +381,7 @@ textarea:focus {
 }
 
 .preview-panel .button-row {
-  flex: 1 1 220px;
+  flex: 0 1 auto;
 }
 
 .preview-nav-buttons,
@@ -817,7 +817,12 @@ textarea {
   }
 
   .preview-panel .button-row {
+    width: 100%;
     justify-content: flex-start;
+  }
+
+  .preview-panel .button-row > * {
+    flex: 1 1 150px;
   }
 
   .preview-nav-buttons,
