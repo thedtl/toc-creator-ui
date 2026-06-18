@@ -120,6 +120,7 @@ label,
 }
 
 input,
+select,
 textarea {
   width: 100%;
   border: 1px solid #a7a9b2;
@@ -128,12 +129,14 @@ textarea {
   background: #fff;
 }
 
-input {
+input,
+select {
   min-height: 44px;
   padding: 10px 12px;
 }
 
 input:focus,
+select:focus,
 textarea:focus {
   outline: 2px solid #7da4ff;
   border-color: var(--dtl-blue);
@@ -288,6 +291,47 @@ textarea:focus {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
+}
+
+.contributor-field {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 10px;
+}
+
+.contributor-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.contributors-list {
+  display: grid;
+  gap: 10px;
+}
+
+.contributor-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(150px, 1fr) minmax(150px, 1fr) 38px;
+  gap: 10px;
+  align-items: end;
+}
+
+.contributor-row .input-stack {
+  min-width: 0;
+}
+
+.remove-contributor {
+  width: 38px;
+  min-width: 38px;
+  min-height: 44px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid #e2a4a4;
+  background: #fff6f6;
+  color: #9b1c1c;
+  font-weight: 700;
 }
 
 .title-field {
@@ -845,6 +889,7 @@ textarea {
   .workspace,
   .review-grid,
   .metadata-grid,
+  .contributor-row,
   .debug-content,
   .feedback-grid,
   .learning-summary {
@@ -866,7 +911,8 @@ textarea {
   .results-panel,
   .debug-content,
   .debug-content .panel-header,
-  .title-field {
+  .title-field,
+  .contributor-field {
     grid-column: span 1;
   }
 

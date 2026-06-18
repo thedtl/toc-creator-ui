@@ -27,6 +27,13 @@ const JOB_POLL_INTERVAL_MS = 2500;
 const JOB_TIMEOUT_MS = 45 * 60 * 1000;
 const JOB_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const PREVIEW_AUTOLOAD_DELAY_MS = 650;
+const CONTRIBUTOR_ROLES = {
+  author: { label: "Author" },
+  editor: { label: "Editor", primarySingle: "ed.", primaryPlural: "eds.", secondary: "Edited by" },
+  translator: { label: "Translator", primarySingle: "trans.", primaryPlural: "trans.", secondary: "Translated by" },
+  compiler: { label: "Compiler", primarySingle: "comp.", primaryPlural: "comps.", secondary: "Compiled by" },
+};
+const CONTRIBUTOR_ROLE_ORDER = ["author", "editor", "translator", "compiler"];
 
 function createStaleAnalysisError() {
   const error = new Error("Analysis was reset.");
@@ -62,8 +69,8 @@ const els = {
   debugOutput: $("debug-output"),
   jsonOutput: $("json-output"),
   filenamePreview: $("filename-preview"),
-  authorLast: $("author-last"),
-  authorFirst: $("author-first"),
+  contributorsList: $("contributors-list"),
+  addContributor: $("add-contributor"),
   title: $("work-title"),
   mmsId: $("mms-id"),
   oclc: $("oclc"),
@@ -369,6 +376,186 @@ function normalizeSourceCode(value) {
     .trim();
 }
 
+function normalizeContributorRole(role) {
+  const cleaned = cleanFilenamePart(role).toLowerCase();
+  return CONTRIBUTOR_ROLES[cleaned] ? cleaned : "author";
+}
+
+function normalizeContributor(contributor = {}) {
+  return {
+    role: normalizeContributorRole(contributor.role),
+    last: cleanFilenamePart(contributor.last),
+    first: cleanFilenamePart(contributor.first),
+  };
+}
+
+function normalizeContributors(contributors = []) {
+  return contributors
+    .map(normalizeContributor)
+    .filter((contributor) => contributor.last || contributor.first);
+}
+
+function contributorRows() {
+  return Array.from(els.contributorsList.querySelectorAll(".contributor-row"));
+}
+
+function getContributorsFromForm() {
+  return normalizeContributors(contributorRows().map((row) => ({
+    role: row.querySelector(".contributor-role").value,
+    last: row.querySelector(".contributor-last").value,
+    first: row.querySelector(".contributor-first").value,
+  })));
+}
+
+function serializeContributors(contributors) {
+  const normalized = normalizeContributors(contributors);
+  return normalized.length ? JSON.stringify(normalized) : "";
+}
+
+function contributorName(contributor, invert = false) {
+  const normalized = normalizeContributor(contributor);
+  if (normalized.last && normalized.first) {
+    return invert ? `${normalized.last}, ${normalized.first}` : `${normalized.first} ${normalized.last}`;
+  }
+  return normalized.last || normalized.first;
+}
+
+function joinContributorNames(contributors, invertFirst = true) {
+  const names = normalizeContributors(contributors)
+    .map((contributor, index) => contributorName(contributor, invertFirst && index === 0))
+    .filter(Boolean);
+  if (names.length <= 1) return names[0] || "";
+  if (names.length === 2) return invertFirst ? `${names[0]}, and ${names[1]}` : `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+}
+
+function primaryContributorCredit(role, contributors) {
+  const names = joinContributorNames(contributors, true);
+  if (!names) return "";
+  const roleConfig = CONTRIBUTOR_ROLES[normalizeContributorRole(role)];
+  if (!roleConfig?.primarySingle) return names;
+  const suffix = normalizeContributors(contributors).length > 1 ? roleConfig.primaryPlural : roleConfig.primarySingle;
+  return `${names}, ${suffix}`;
+}
+
+function secondaryContributorCredit(role, contributors) {
+  const names = joinContributorNames(contributors, false);
+  const label = CONTRIBUTOR_ROLES[normalizeContributorRole(role)]?.secondary;
+  return names && label ? `${label} ${names}` : "";
+}
+
+function buildContributorCredits() {
+  const contributors = getContributorsFromForm();
+  const byRole = CONTRIBUTOR_ROLE_ORDER.reduce((groups, role) => {
+    groups[role] = contributors.filter((contributor) => contributor.role === role);
+    return groups;
+  }, {});
+
+  if (byRole.author.length) {
+    return {
+      primary: joinContributorNames(byRole.author, true),
+      afterTitle: CONTRIBUTOR_ROLE_ORDER
+        .filter((role) => role !== "author")
+        .map((role) => secondaryContributorCredit(role, byRole[role]))
+        .filter(Boolean),
+    };
+  }
+
+  const primaryRole = CONTRIBUTOR_ROLE_ORDER.find((role) => byRole[role].length);
+  if (!primaryRole) return { primary: "", afterTitle: [] };
+
+  return {
+    primary: primaryContributorCredit(primaryRole, byRole[primaryRole]),
+    afterTitle: CONTRIBUTOR_ROLE_ORDER
+      .filter((role) => role !== primaryRole)
+      .map((role) => secondaryContributorCredit(role, byRole[role]))
+      .filter(Boolean),
+  };
+}
+
+function markContributorsTouched() {
+  state.metadataTouched.add("contributors");
+  delete state.metadataAutoValues.contributors;
+  updateFilenamePreview();
+}
+
+function contributorRoleOptions(selectedRole) {
+  const selected = normalizeContributorRole(selectedRole);
+  return CONTRIBUTOR_ROLE_ORDER.map((role) => {
+    const isSelected = role === selected ? " selected" : "";
+    return `<option value="${role}"${isSelected}>${CONTRIBUTOR_ROLES[role].label}</option>`;
+  }).join("");
+}
+
+function addContributorRow(contributor = {}, options = {}) {
+  const normalized = normalizeContributor(contributor);
+  const row = document.createElement("div");
+  row.className = "contributor-row";
+  row.innerHTML = `
+    <div class="input-stack">
+      <label>Role</label>
+      <select class="contributor-role" aria-label="Contributor role">${contributorRoleOptions(normalized.role)}</select>
+    </div>
+    <div class="input-stack">
+      <label>Last name or full name</label>
+      <input class="contributor-last" type="text" placeholder="Barth" aria-label="Last name or full name">
+    </div>
+    <div class="input-stack">
+      <label>First name</label>
+      <input class="contributor-first" type="text" placeholder="Karl" aria-label="First name">
+    </div>
+    <button class="remove-contributor" type="button" aria-label="Remove contributor">x</button>
+  `;
+  row.querySelector(".contributor-last").value = normalized.last;
+  row.querySelector(".contributor-first").value = normalized.first;
+  row.querySelectorAll("input").forEach((input) => {
+    input.addEventListener("input", markContributorsTouched);
+  });
+  row.querySelector(".contributor-role").addEventListener("change", markContributorsTouched);
+  row.querySelector(".remove-contributor").addEventListener("click", () => {
+    row.remove();
+    if (!contributorRows().length) {
+      addContributorRow();
+    }
+    markContributorsTouched();
+  });
+  els.contributorsList.appendChild(row);
+  if (options.focus) {
+    row.querySelector(".contributor-last").focus();
+  }
+  return row;
+}
+
+function setContributorRows(contributors = [], options = {}) {
+  els.contributorsList.innerHTML = "";
+  const rows = contributors.length ? contributors : [{}];
+  rows.forEach((contributor) => addContributorRow(contributor));
+  if (options.auto) {
+    state.metadataAutoValues.contributors = serializeContributors(getContributorsFromForm());
+  }
+}
+
+function setContributorMetadata(contributors) {
+  const normalized = normalizeContributors(contributors);
+  if (!normalized.length) return false;
+  const current = serializeContributors(getContributorsFromForm());
+  const currentWasAuto = state.metadataAutoValues.contributors && current === state.metadataAutoValues.contributors;
+  if (state.metadataTouched.has("contributors") && current) return false;
+  if (current && !currentWasAuto) return false;
+  setContributorRows(normalized, { auto: true });
+  return true;
+}
+
+function clearContributorsIfAuto() {
+  const current = serializeContributors(getContributorsFromForm());
+  const currentWasAuto = state.metadataAutoValues.contributors && current === state.metadataAutoValues.contributors;
+  if (state.metadataTouched.has("contributors") && current) return false;
+  if (current && !currentWasAuto) return false;
+  setContributorRows([{}]);
+  delete state.metadataAutoValues.contributors;
+  return true;
+}
+
 function isSourceCodeCandidate(value) {
   const code = normalizeSourceCode(value);
   if (!/[0-9]/.test(code)) return false;
@@ -386,8 +573,6 @@ function addSourceCode(codes, value) {
 
 function metadataFieldElement(field) {
   return {
-    authorLast: els.authorLast,
-    authorFirst: els.authorFirst,
     title: els.title,
     mmsId: els.mmsId,
     oclc: els.oclc,
@@ -434,7 +619,8 @@ function clearMetadataTracking() {
 }
 
 function clearAutomaticMetadataFields() {
-  ["authorLast", "authorFirst", "title", "mmsId", "oclc", "sourceCode"].forEach((field) => {
+  clearContributorsIfAuto();
+  ["title", "mmsId", "oclc", "sourceCode"].forEach((field) => {
     clearMetadataFieldIfAuto(field);
   });
   updateFilenamePreview();
@@ -500,18 +686,21 @@ function inferMetadataFromName(name) {
 }
 
 function buildOutputFilename() {
-  const last = cleanFilenamePart(els.authorLast.value);
-  const first = cleanFilenamePart(els.authorFirst.value);
+  const contributorCredits = buildContributorCredits();
   const title = cleanFilenamePart(els.title.value) || "Untitled";
   const mmsId = normalizeIdentifier(els.mmsId.value);
   const oclc = cleanFilenamePart(els.oclc.value);
   const sourceCode = normalizeSourceCode(els.sourceCode.value);
-  const author = last && first ? `${last}, ${first}` : (last || first);
   const identifiers = [];
   if (mmsId) identifiers.push(`MMS ID ${mmsId}`);
   if (oclc) identifiers.push(`OCLC ${oclc}`);
   if (sourceCode) identifiers.push(sourceCode);
-  const pieces = [author, title, identifiers.join(", ")].filter(Boolean);
+  const pieces = [
+    contributorCredits.primary,
+    title,
+    ...contributorCredits.afterTitle,
+    identifiers.join(", "),
+  ].filter(Boolean);
   let base = pieces.join(". ").replace(/\.\s*\./g, ".").trim();
   base = base.replace(/\s+\./g, ".").replace(/\s+/g, " ");
 
@@ -830,9 +1019,69 @@ function suggestedAuthorDisplay(metadata) {
   return original || westernName || romanized;
 }
 
-function metadataCreatorRoleCanNameBook(metadata) {
+function metadataCreatorRoleIsContributor(metadata) {
   const role = cleanFilenamePart(metadata?.creator_role).toLowerCase();
-  return !role || ["author", "editor", "organization", "unknown"].includes(role);
+  return !role || ["author", "editor", "translator", "compiler", "organization", "unknown"].includes(role);
+}
+
+function contributorRoleFromMetadata(metadata) {
+  const role = cleanFilenamePart(metadata?.creator_role).toLowerCase();
+  if (role.includes("edit")) return "editor";
+  if (role.includes("trans")) return "translator";
+  if (role.includes("compil")) return "compiler";
+  return "author";
+}
+
+function contributorRoleFromMetadataContributor(contributor) {
+  const role = cleanFilenamePart(contributor?.role).toLowerCase();
+  if (role.includes("edit")) return "editor";
+  if (role.includes("trans")) return "translator";
+  if (role.includes("compil")) return "compiler";
+  return "author";
+}
+
+function suggestedContributor(metadata) {
+  const role = contributorRoleFromMetadata(metadata);
+  if (metadata.is_english === false) {
+    return { role, last: suggestedAuthorDisplay(metadata), first: "" };
+  }
+  if (cleanFilenamePart(metadata.author_last) || cleanFilenamePart(metadata.author_first)) {
+    return {
+      role,
+      last: metadata.author_last || suggestedAuthorDisplay(metadata),
+      first: metadata.author_first || "",
+    };
+  }
+  return { role, last: suggestedAuthorDisplay(metadata), first: "" };
+}
+
+function suggestedContributorFromMetadataContributor(contributor, metadata) {
+  const role = contributorRoleFromMetadataContributor(contributor);
+  const original = cleanFilenamePart(contributor?.name_original);
+  const romanized = cleanFilenamePart(contributor?.name_romanized);
+  const first = cleanFilenamePart(contributor?.first);
+  const last = cleanFilenamePart(contributor?.last);
+  if (metadata?.is_english === false && containsNonLatinLetters(original)) {
+    return { role, last: bracketedEquivalent(original, romanized), first: "" };
+  }
+  if (last || first) {
+    return { role, last: last || original || romanized, first };
+  }
+  return { role, last: original || romanized, first: "" };
+}
+
+function suggestedContributors(metadata) {
+  const contributors = Array.isArray(metadata?.contributors)
+    ? metadata.contributors
+      .map((contributor) => suggestedContributorFromMetadataContributor(contributor, metadata))
+      .filter((contributor) => cleanFilenamePart(contributor.last) || cleanFilenamePart(contributor.first))
+    : [];
+  if (contributors.length) return contributors;
+
+  const legacyContributor = suggestedContributor(metadata);
+  return cleanFilenamePart(legacyContributor.last) || cleanFilenamePart(legacyContributor.first)
+    ? [legacyContributor]
+    : [];
 }
 
 function metadataHasVisibleEvidence(metadata) {
@@ -850,36 +1099,19 @@ function applyMetadataSuggestion(metadata) {
   const title = suggestedTitleValue(metadata);
   if (setMetadataField("title", title)) applied.push("title");
 
-  if (!metadataCreatorRoleCanNameBook(metadata)) {
+  const contributors = suggestedContributors(metadata);
+  if (!contributors.length && !metadataCreatorRoleIsContributor(metadata)) {
     updateFilenamePreview();
     return applied;
   }
 
-  const hasAuthor = Boolean(
-    cleanFilenamePart(metadata.author_original)
-      || cleanFilenamePart(metadata.author_romanized)
-      || cleanFilenamePart(metadata.author_last)
-      || cleanFilenamePart(metadata.author_first)
-  );
-  if (!hasAuthor) {
+  if (!contributors.length) {
     updateFilenamePreview();
     return applied;
   }
 
-  if (metadata.is_english === false) {
-    if (setMetadataField("authorLast", suggestedAuthorDisplay(metadata))) {
-      clearMetadataFieldIfAuto("authorFirst");
-      applied.push("author");
-    }
-  } else if (cleanFilenamePart(metadata.author_last) || cleanFilenamePart(metadata.author_first)) {
-    const lastApplied = setMetadataField("authorLast", metadata.author_last || suggestedAuthorDisplay(metadata));
-    const firstApplied = metadata.author_first
-      ? setMetadataField("authorFirst", metadata.author_first)
-      : clearMetadataFieldIfAuto("authorFirst");
-    if (lastApplied || firstApplied) applied.push("author");
-  } else if (setMetadataField("authorLast", suggestedAuthorDisplay(metadata))) {
-    clearMetadataFieldIfAuto("authorFirst");
-    applied.push("author");
+  if (setContributorMetadata(contributors)) {
+    applied.push(contributors.length > 1 ? "contributors" : "contributor");
   }
 
   updateFilenamePreview();
@@ -889,7 +1121,7 @@ function applyMetadataSuggestion(metadata) {
 async function suggestMetadataForSource(normalizedUrl, runId) {
   assertAnalysisRunActive(runId);
   const password = requireStaffPassword();
-  addProgress("Looking for title/author on the first pages...");
+  addProgress("Looking for title/contributors on the first pages...");
   const response = await fetch(`${WORKER_URL}/toc/metadata`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -911,7 +1143,7 @@ async function suggestMetadataForSource(normalizedUrl, runId) {
   if (appliedFields.length) {
     addProgress(`Applied ${appliedFields.join(" and ")} from metadata scan${page}.`);
   } else {
-    addProgress("Metadata scan did not find confident title/author fields to apply.");
+    addProgress("Metadata scan did not find confident title/contributor fields to apply.");
   }
   refreshDebug();
   return data;
@@ -1194,7 +1426,8 @@ async function resetForNextPdf() {
   state.startedAt = null;
 
   els.url.value = "";
-  [els.authorLast, els.authorFirst, els.title, els.mmsId, els.oclc, els.sourceCode].forEach((input) => {
+  setContributorRows([{}]);
+  [els.title, els.mmsId, els.oclc, els.sourceCode].forEach((input) => {
     input.value = "";
   });
   setEntries([]);
@@ -1273,9 +1506,9 @@ document.addEventListener("DOMContentLoaded", () => {
     els.passwordSaved.hidden = false;
   }
 
+  setContributorRows([{}]);
+
   [
-    [els.authorLast, "authorLast"],
-    [els.authorFirst, "authorFirst"],
     [els.title, "title"],
     [els.mmsId, "mmsId"],
     [els.oclc, "oclc"],
@@ -1286,6 +1519,13 @@ document.addEventListener("DOMContentLoaded", () => {
       delete state.metadataAutoValues[field];
       updateFilenamePreview();
     });
+  });
+
+  els.addContributor.addEventListener("click", () => {
+    state.metadataTouched.add("contributors");
+    delete state.metadataAutoValues.contributors;
+    addContributorRow({}, { focus: true });
+    updateFilenamePreview();
   });
 
   els.staffPassword.addEventListener("change", () => {
