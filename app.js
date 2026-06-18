@@ -315,8 +315,9 @@ function isPreviewableDropboxPdfUrl(url) {
 
 function cleanFilenamePart(value) {
   return (value || "")
+    .normalize("NFC")
     .replace(/[\\/:*?"<>|]+/g, " ")
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -353,11 +354,52 @@ function normalizeIdentifier(value) {
     .trim();
 }
 
+function extractFilenameIdentifiers(value) {
+  let text = value || "";
+  let mmsId = "";
+  let oclc = "";
+
+  text = text.replace(/\b(?:oclc|ocn)\b[\s:#-]*(\d{6,})\b/gi, (match, id) => {
+    if (!oclc) oclc = id;
+    return " ";
+  });
+
+  text = text.replace(/\bmms\s*id\b[\s:#-]*([A-Z0-9]+(?:\s+[A-Z0-9]+){0,3})\b/gi, (match, id) => {
+    if (!mmsId) mmsId = normalizeIdentifier(id);
+    return " ";
+  });
+
+  text = text.replace(/\b\d{6,}\b/g, (id) => {
+    if (!mmsId && id.length >= 13) {
+      mmsId = id;
+      return " ";
+    }
+    if (!oclc && id.length < 13) {
+      oclc = id;
+      return " ";
+    }
+    return id;
+  });
+
+  return {
+    text: text.replace(/\s+/g, " ").trim(),
+    mmsId,
+    oclc,
+  };
+}
+
+function stripFilenameFormatTail(value) {
+  return (value || "")
+    .replace(/\b(?:ebook|e-book|pdf)\b(?:\s+e)?\s*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function splitTrailingAuthor(value) {
   const tokens = (value || "").split(/\s+/).filter(Boolean);
   if (tokens.length < 3) return null;
 
-  const isInitial = (token) => /^\p{L}\.?$/u.test(token);
+  const isInitial = (token) => /^\p{L}\.$/u.test(token) || /^[A-Za-z]$/u.test(token);
   const isNamePart = (token) => /^\p{L}[\p{L}\p{M}'’.-]*$/u.test(token);
   const last = tokens[tokens.length - 1];
   const prev = tokens[tokens.length - 2];
@@ -396,23 +438,15 @@ function splitTitleAuthor(value) {
 
 function inferMetadataFromName(name) {
   const base = stripBookmarkedSuffix(titleCaseFromSlug(name));
-  const oclcMatch = base.match(/\b(?:oclc|ocn)?\s*(\d{6,})\b/i);
-  if (oclcMatch && !els.oclc.value.trim()) {
-    els.oclc.value = oclcMatch[1];
+  const inferred = extractFilenameIdentifiers(base);
+  if (inferred.oclc && !els.oclc.value.trim()) {
+    els.oclc.value = inferred.oclc;
+  }
+  if (inferred.mmsId && !els.mmsId.value.trim()) {
+    els.mmsId.value = inferred.mmsId;
   }
 
-  const afterOclc = oclcMatch ? base.slice(oclcMatch.index + oclcMatch[0].length) : "";
-  const mmsMatch = afterOclc.match(/(?:\bmms\s*id\b)?\s*([A-Z0-9]+(?:\s+[A-Z0-9]+){0,3})\s*$/i);
-  if (mmsMatch && !els.mmsId.value.trim()) {
-    els.mmsId.value = normalizeIdentifier(mmsMatch[1]);
-  }
-
-  const withoutIdentifiers = base
-    .replace(/\b(?:oclc|ocn)?\s*\d{6,}\b/i, "")
-    .replace(/\bmms\s*id\b/gi, "")
-    .replace(/\s+\d[A-Z0-9]*(?:\s+[A-Z0-9]+){0,3}\s*$/i, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  const withoutIdentifiers = stripFilenameFormatTail(inferred.text);
 
   const commaParts = withoutIdentifiers.split(",").map((part) => part.trim()).filter(Boolean);
   if (commaParts.length >= 3) {
