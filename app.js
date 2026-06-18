@@ -622,8 +622,8 @@ async function renderPreviewPage(pageNumber) {
 
   const page = await state.previewDoc.getPage(safePage);
   const baseViewport = page.getViewport({ scale: 1 });
-  const availableWidth = Math.max(280, els.previewFrame.clientWidth - 36);
-  const availableHeight = Math.max(320, els.previewFrame.clientHeight - 36);
+  const availableWidth = Math.max(280, els.previewFrame.clientWidth);
+  const availableHeight = Math.max(320, els.previewFrame.clientHeight);
   const scale = Math.max(
     0.2,
     Math.min(2, availableWidth / baseViewport.width, availableHeight / baseViewport.height)

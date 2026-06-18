@@ -369,16 +369,41 @@ textarea:focus {
 }
 
 .preview-toolbar {
+  display: grid;
+  grid-template-columns: auto auto minmax(180px, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.preview-panel .panel-header {
+  flex-wrap: wrap;
+}
+
+.preview-panel .button-row {
+  flex: 1 1 220px;
+}
+
+.preview-nav-buttons,
+.preview-page-controls {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+}
+
+.preview-nav-buttons {
   flex-wrap: wrap;
-  margin-bottom: 16px;
+}
+
+.preview-page-controls {
+  flex-wrap: nowrap;
 }
 
 .inline-label,
 .page-total {
   color: var(--muted);
+  white-space: nowrap;
 }
 
 #preview-page {
@@ -387,10 +412,12 @@ textarea:focus {
 }
 
 .preview-status {
-  margin-left: auto;
   color: var(--muted);
   font-size: 14px;
   font-weight: 700;
+  justify-self: end;
+  overflow-wrap: anywhere;
+  text-align: right;
 }
 
 .preview-status.ok {
@@ -407,25 +434,17 @@ textarea:focus {
   overflow: hidden;
   border: 1px solid #ccd5ef;
   border-radius: 8px;
-  background:
-    linear-gradient(45deg, #f2f3f8 25%, transparent 25%),
-    linear-gradient(-45deg, #f2f3f8 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #f2f3f8 75%),
-    linear-gradient(-45deg, transparent 75%, #f2f3f8 75%),
-    #fff;
-  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
-  background-size: 20px 20px;
+  background: #fff;
   display: flex;
   justify-content: center;
   align-items: center;
-  padding: 18px;
+  padding: 0;
 }
 
 #preview-canvas {
   display: block;
   max-width: 100%;
   background: #fff;
-  box-shadow: 0 4px 18px rgba(22, 26, 38, 0.18);
 }
 
 #preview-canvas[hidden],
@@ -442,9 +461,7 @@ textarea:focus {
   color: var(--muted);
   font-weight: 700;
   text-align: center;
-  background: rgba(255, 255, 255, 0.78);
-  border: 1px dashed #b7c3e4;
-  border-radius: 8px;
+  background: #fff;
 }
 
 .button-row {
@@ -791,7 +808,25 @@ textarea {
   }
 
   .preview-status {
-    margin-left: 0;
+    justify-self: start;
+    text-align: left;
+  }
+
+  .preview-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .preview-panel .button-row {
+    justify-content: flex-start;
+  }
+
+  .preview-nav-buttons,
+  .preview-page-controls {
+    width: 100%;
+  }
+
+  .preview-nav-buttons > * {
+    flex: 1 1 140px;
   }
 
   .segmented-control {
