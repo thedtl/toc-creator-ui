@@ -1206,7 +1206,6 @@ async function runAnalysis(event) {
     });
 
     state.analysis = await analyzeSource(runId);
-    await metadataPromise;
     assertAnalysisRunActive(runId);
     setEntries(state.analysis.entries || []);
     els.alignmentStatus.textContent = `${state.analysis.alignment_source || "unknown"} / ${state.analysis.alignment_confidence || "unknown"}`;
@@ -1215,6 +1214,7 @@ async function runAnalysis(event) {
     els.createPdf.disabled = false;
     addProgress(`Analysis complete: ${getEntriesFromTable().length} entries.`);
     syncProgressMessages(state.analysis.progress || []);
+    await metadataPromise;
   } catch (error) {
     if (error.name === "StaleAnalysisRun") return;
     els.downloadState.textContent = "Analysis failed";
