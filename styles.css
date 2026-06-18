@@ -255,6 +255,14 @@ textarea:focus {
   max-width: 580px;
 }
 
+@media (min-width: 1101px) {
+  .preview-panel {
+    position: sticky;
+    top: 16px;
+    align-self: start;
+  }
+}
+
 .panel-header {
   display: flex;
   align-items: center;
@@ -684,6 +692,35 @@ td input {
   margin-top: 14px;
   display: flex;
   justify-content: flex-end;
+}
+
+.feedback-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 9px;
+  border: 1px solid #c7d2ef;
+  border-radius: 999px;
+  background: #fff;
+  font-weight: 700;
+}
+
+.feedback-state.saved {
+  border-color: #9bd2b5;
+  background: #edf8f2;
+  color: var(--success);
+}
+
+.feedback-state.saving {
+  border-color: #dfca8a;
+  background: #fff9e8;
+  color: var(--warning);
+}
+
+.feedback-state.error {
+  border-color: #ebb0ad;
+  background: #fff0f0;
+  color: var(--error);
 }
 
 .debug-panel {

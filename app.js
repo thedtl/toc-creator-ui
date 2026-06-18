@@ -15,6 +15,7 @@ const state = {
   analysisRunId: 0,
   feedbackOutcome: "",
   feedbackIssues: [],
+  feedbackSaveTimer: null,
   metadataSuggestion: null,
   metadataTouched: new Set(),
   metadataAutoValues: {},
@@ -146,11 +147,22 @@ function routeSummary(analysis = state.analysis) {
   return analysis ? "unknown" : "not run";
 }
 
+function setFeedbackState(text, kind = "neutral") {
+  if (!els.feedbackState) return;
+  els.feedbackState.textContent = text;
+  els.feedbackState.className = `feedback-state ${kind}`;
+}
+
 function resetFeedbackState() {
   state.feedbackOutcome = "";
   state.feedbackIssues = [];
+  if (state.feedbackSaveTimer) {
+    clearTimeout(state.feedbackSaveTimer);
+    state.feedbackSaveTimer = null;
+  }
   if (els.feedbackNote) els.feedbackNote.value = "";
-  if (els.feedbackState) els.feedbackState.textContent = "No feedback saved";
+  setFeedbackState("No feedback saved", "neutral");
+  if (els.saveFeedback) els.saveFeedback.textContent = "Save feedback";
   document.querySelectorAll("#feedback-options button").forEach((button) => {
     button.classList.remove("active");
   });
@@ -290,7 +302,7 @@ async function saveRunFeedback() {
   });
   const result = await parseJsonResponse(response, "Worker");
   if (!result.ok) throw new Error(result.error || "Feedback was not saved.");
-  els.feedbackState.textContent = "Feedback saved";
+  setFeedbackState("Feedback saved and submitted.", "saved");
   addProgress(`Feedback saved for run ${runId.slice(0, 12)}.`);
   return result;
 }
@@ -1355,12 +1367,30 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   els.saveFeedback.addEventListener("click", async () => {
-    els.feedbackState.textContent = "Saving feedback";
+    if (state.feedbackSaveTimer) {
+      clearTimeout(state.feedbackSaveTimer);
+      state.feedbackSaveTimer = null;
+    }
+    els.saveFeedback.disabled = true;
+    els.saveFeedback.textContent = "Saving...";
+    setFeedbackState("Saving feedback...", "saving");
     try {
       await saveRunFeedback();
+      els.saveFeedback.textContent = "Saved";
+      state.feedbackSaveTimer = setTimeout(() => {
+        els.saveFeedback.textContent = "Save feedback";
+        els.saveFeedback.disabled = !currentRunId();
+        state.feedbackSaveTimer = null;
+      }, 2500);
     } catch (error) {
-      els.feedbackState.textContent = "Feedback save failed";
+      els.saveFeedback.textContent = "Save failed";
+      setFeedbackState("Feedback save failed.", "error");
       addProgress(`Feedback error: ${error.message}`);
+      state.feedbackSaveTimer = setTimeout(() => {
+        els.saveFeedback.textContent = "Save feedback";
+        els.saveFeedback.disabled = !currentRunId();
+        state.feedbackSaveTimer = null;
+      }, 2500);
     }
   });
 
