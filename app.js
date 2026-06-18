@@ -1276,7 +1276,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const name = filenameFromUrl(els.url.value.trim());
     if (name && name !== "document.pdf") {
       state.pdfName = name;
-      inferMetadataFromName(name);
     }
   });
 
