@@ -225,7 +225,7 @@ textarea:focus {
   width: min(1440px, calc(100vw - 48px));
   margin: 74px auto 90px;
   display: grid;
-  grid-template-columns: minmax(0, 1.18fr) minmax(430px, 0.82fr);
+  grid-template-columns: minmax(420px, 580px) minmax(520px, 1fr);
   gap: 24px;
   align-items: stretch;
 }
@@ -248,6 +248,11 @@ textarea:focus {
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+
+.preview-panel {
+  width: 100%;
+  max-width: 580px;
 }
 
 .panel-header {
@@ -517,7 +522,7 @@ th:nth-child(3) {
 }
 
 th:nth-child(4) {
-  width: 190px;
+  width: 116px;
 }
 
 td input {
@@ -533,21 +538,33 @@ td input {
 }
 
 .row-actions {
-  width: 190px;
+  width: 116px;
   display: flex;
   gap: 6px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .preview-row,
 .flag-row {
-  min-height: 36px;
-  padding: 7px 10px;
+  width: 34px;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0;
   border-radius: 6px;
   border: 1px solid var(--dtl-blue);
   background: #fff;
   color: var(--dtl-blue);
   font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.preview-row svg,
+.flag-row svg {
+  width: 17px;
+  height: 17px;
+  stroke-width: 2.2;
 }
 
 .flag-row.flagged {
@@ -555,13 +572,18 @@ td input {
 }
 
 .remove-row {
-  width: 36px;
-  min-height: 36px;
+  width: 34px;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0;
   border-radius: 6px;
   border: 1px solid #e2a4a4;
   background: #fff6f6;
   color: #9b1c1c;
   font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .learning-box {

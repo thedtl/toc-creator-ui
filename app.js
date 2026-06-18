@@ -813,6 +813,14 @@ function setEntries(entries) {
   updateEntryCount();
 }
 
+function iconSvg(name) {
+  const icons = {
+    eye: '<svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M2.06 12.35a1 1 0 0 1 0-.7C3.42 7.58 7.25 5 12 5s8.58 2.58 9.94 6.65a1 1 0 0 1 0 .7C20.58 16.42 16.75 19 12 19s-8.58-2.58-9.94-6.65Z"></path><circle cx="12" cy="12" r="3"></circle></svg>',
+    flag: '<svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22V4"></path><path d="M4 4h12l-1 4 1 4H4"></path></svg>',
+  };
+  return icons[name] || "";
+}
+
 function addEntryRow(entry = {}) {
   const row = document.createElement("tr");
   row.innerHTML = `
@@ -820,9 +828,9 @@ function addEntryRow(entry = {}) {
     <td class="page-cell"><input class="entry-page" type="text"></td>
     <td class="level-cell"><input class="entry-level" type="number" min="0" step="1"></td>
     <td class="row-actions">
-      <button class="preview-row" type="button">Preview</button>
-      <button class="flag-row" type="button">Flag</button>
-      <button class="remove-row" type="button" aria-label="Remove row">x</button>
+      <button class="preview-row" type="button" aria-label="Preview row" title="Preview row">${iconSvg("eye")}</button>
+      <button class="flag-row" type="button" aria-label="Flag row" title="Flag row">${iconSvg("flag")}</button>
+      <button class="remove-row" type="button" aria-label="Remove row" title="Remove row">x</button>
     </td>
   `;
   row.dataset.originalTitle = entry.title || "";
