@@ -796,10 +796,17 @@ function bracketedEquivalent(original, equivalent) {
   return `${base} [${bracket}]`;
 }
 
+function containsNonLatinLetters(value) {
+  for (const char of cleanFilenamePart(value)) {
+    if (/\p{L}/u.test(char) && !/\p{Script=Latin}/u.test(char)) return true;
+  }
+  return false;
+}
+
 function suggestedTitleValue(metadata) {
   const original = joinMetadataParts(metadata?.title_original, metadata?.subtitle_original);
   const english = joinMetadataParts(metadata?.title_english, metadata?.subtitle_english);
-  if (metadata?.is_english === false) return bracketedEquivalent(original, english);
+  if (containsNonLatinLetters(original)) return bracketedEquivalent(original, english);
   return original || english;
 }
 
@@ -807,7 +814,7 @@ function suggestedAuthorDisplay(metadata) {
   const original = cleanFilenamePart(metadata?.author_original);
   const romanized = cleanFilenamePart(metadata?.author_romanized);
   const westernName = joinMetadataParts(metadata?.author_first, metadata?.author_last).replace(/: /g, " ");
-  if (metadata?.is_english === false) return bracketedEquivalent(original, romanized);
+  if (containsNonLatinLetters(original)) return bracketedEquivalent(original, romanized);
   return original || westernName || romanized;
 }
 
