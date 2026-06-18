@@ -678,7 +678,6 @@ async function loadPreviewDocument(targetPage = 1) {
 
   state.pdfUrl = normalizedUrl;
   state.pdfName = filenameFromUrl(normalizedUrl);
-  inferMetadataFromName(state.pdfName);
   updateSourceLink();
 
   setPreviewStatus("Loading PDF preview...");
