@@ -15,6 +15,9 @@ const state = {
   analysisRunId: 0,
   feedbackOutcome: "",
   feedbackIssues: [],
+  metadataSuggestion: null,
+  metadataTouched: new Set(),
+  metadataAutoValues: {},
 };
 
 const WORKER_URL = "https://dtl-chapter-request.ccrawford.workers.dev";
@@ -63,6 +66,7 @@ const els = {
   title: $("work-title"),
   mmsId: $("mms-id"),
   oclc: $("oclc"),
+  sourceCode: $("source-code"),
   healthCheck: $("health-check"),
   resetTool: $("reset-tool"),
   loadPreview: $("load-preview"),
@@ -322,14 +326,6 @@ function cleanFilenamePart(value) {
     .trim();
 }
 
-function titleCaseFromSlug(value) {
-  return (value || "")
-    .replace(/\.pdf$/i, "")
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function filenameFromUrl(url) {
   try {
     const parsed = new URL(url);
@@ -354,128 +350,153 @@ function normalizeIdentifier(value) {
     .trim();
 }
 
+function normalizeSourceCode(value) {
+  return cleanFilenamePart(value)
+    .replace(/\s*-\s*/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isSourceCodeCandidate(value) {
+  const code = normalizeSourceCode(value);
+  if (!/[0-9]/.test(code)) return false;
+  if (!/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+$/.test(code)) return false;
+  const segments = code.split("-");
+  return code.length <= 14 && segments.length <= 4 && segments.some((segment) => segment.length <= 2);
+}
+
+function addSourceCode(codes, value) {
+  const code = normalizeSourceCode(value);
+  if (code && isSourceCodeCandidate(code) && !codes.includes(code)) {
+    codes.push(code);
+  }
+}
+
+function metadataFieldElement(field) {
+  return {
+    authorLast: els.authorLast,
+    authorFirst: els.authorFirst,
+    title: els.title,
+    mmsId: els.mmsId,
+    oclc: els.oclc,
+    sourceCode: els.sourceCode,
+  }[field] || null;
+}
+
+function normalizeMetadataField(field, value) {
+  if (field === "mmsId") return normalizeIdentifier(value);
+  if (field === "sourceCode") return normalizeSourceCode(value);
+  return cleanFilenamePart(value);
+}
+
+function setMetadataField(field, value) {
+  const input = metadataFieldElement(field);
+  const cleaned = normalizeMetadataField(field, value);
+  if (!input || !cleaned) return false;
+
+  const current = input.value.trim();
+  const currentWasAuto = state.metadataAutoValues[field] && current === state.metadataAutoValues[field];
+  if (state.metadataTouched.has(field) && current) return false;
+  if (current && !currentWasAuto) return false;
+
+  input.value = cleaned;
+  state.metadataAutoValues[field] = cleaned;
+  return true;
+}
+
+function clearMetadataFieldIfAuto(field) {
+  const input = metadataFieldElement(field);
+  if (!input) return false;
+  const current = input.value.trim();
+  const currentWasAuto = state.metadataAutoValues[field] && current === state.metadataAutoValues[field];
+  if (state.metadataTouched.has(field) && current) return false;
+  if (current && !currentWasAuto) return false;
+  input.value = "";
+  delete state.metadataAutoValues[field];
+  return true;
+}
+
+function clearMetadataTracking() {
+  state.metadataTouched.clear();
+  state.metadataAutoValues = {};
+}
+
+function clearAutomaticMetadataFields() {
+  ["authorLast", "authorFirst", "title", "mmsId", "oclc", "sourceCode"].forEach((field) => {
+    clearMetadataFieldIfAuto(field);
+  });
+  updateFilenamePreview();
+}
+
 function extractFilenameIdentifiers(value) {
-  let text = value || "";
+  let text = stripBookmarkedSuffix((value || "").normalize("NFC").replace(/\.pdf$/i, ""));
   let mmsId = "";
   let oclc = "";
+  const sourceCodes = [];
 
-  text = text.replace(/\b(?:oclc|ocn)\b[\s:#-]*(\d{6,})\b/gi, (match, id) => {
+  text = text.replace(/\b(?:oclc|ocn)\b[\s:_-]*(\d{6,})\b/gi, (match, id) => {
     if (!oclc) oclc = id;
     return " ";
   });
 
-  text = text.replace(/\bmms\s*id\b[\s:#-]*([A-Z0-9]+(?:\s+[A-Z0-9]+){0,3})\b/gi, (match, id) => {
-    if (!mmsId) mmsId = normalizeIdentifier(id);
+  text = text.replace(/\bmms[\s_-]*id\b[\s:_-]*(\d{12,})(?:[\s_-]+([A-Za-z0-9]+(?:-[A-Za-z0-9]+)+))?/gi, (match, id, code) => {
+    if (!mmsId) mmsId = id;
+    if (code) addSourceCode(sourceCodes, code);
     return " ";
   });
 
-  text = text.replace(/\b\d{6,}\b/g, (id) => {
-    if (!mmsId && id.length >= 13) {
+  text = text.replace(/\b(\d{12,})(?:[-_\s]+([A-Za-z0-9]+(?:-[A-Za-z0-9]+)+))?\b/g, (match, id, code) => {
+    if (!mmsId) {
       mmsId = id;
-      return " ";
     }
-    if (!oclc && id.length < 13) {
+    if (code) addSourceCode(sourceCodes, code);
+    return " ";
+  });
+
+  text = text.replace(/\b(\d{6,11})\b/g, (match, id) => {
+    if (!oclc) {
       oclc = id;
       return " ";
     }
     return id;
   });
 
+  text = text.replace(/\b([A-Za-z0-9]+(?:-[A-Za-z0-9]+)+)\b/g, (match, code) => {
+    if (isSourceCodeCandidate(code)) {
+      addSourceCode(sourceCodes, code);
+      return " ";
+    }
+    return match;
+  });
+
   return {
-    text: text.replace(/\s+/g, " ").trim(),
+    text: text.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim(),
     mmsId,
     oclc,
+    sourceCode: sourceCodes[0] || "",
   };
-}
-
-function stripFilenameFormatTail(value) {
-  return (value || "")
-    .replace(/\b(?:ebook|e-book|pdf)\b(?:\s+e)?\s*$/i, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function splitTrailingAuthor(value) {
-  const tokens = (value || "").split(/\s+/).filter(Boolean);
-  if (tokens.length < 3) return null;
-
-  const isInitial = (token) => /^\p{L}\.$/u.test(token) || /^[A-Za-z]$/u.test(token);
-  const isNamePart = (token) => /^\p{L}[\p{L}\p{M}'’.-]*$/u.test(token);
-  const last = tokens[tokens.length - 1];
-  const prev = tokens[tokens.length - 2];
-  if (!isNamePart(last) || !(isNamePart(prev) || isInitial(prev))) return null;
-
-  let authorStart = tokens.length - 2;
-  if (tokens.length >= 4 && isInitial(prev) && isNamePart(tokens[tokens.length - 3])) {
-    authorStart = tokens.length - 3;
-  }
-
-  const titleTokens = tokens.slice(0, authorStart);
-  if (!titleTokens.length) return null;
-  const authorTokens = tokens.slice(authorStart);
-  return {
-    title: titleTokens.join(" "),
-    first: authorTokens.slice(0, -1).join(" "),
-    last: authorTokens[authorTokens.length - 1],
-  };
-}
-
-function splitTitleAuthor(value) {
-  const cleaned = stripBookmarkedSuffix(value).replace(/\s+/g, " ").trim();
-  const editionMatch = cleaned.match(/^(.*?\b\d+(?:st|nd|rd|th)?\s+ed\.)\s+(.+)$/i);
-  if (editionMatch) {
-    const author = splitTrailingAuthor(`Title ${editionMatch[2]}`);
-    if (author) {
-      return {
-        title: editionMatch[1],
-        first: author.first,
-        last: author.last,
-      };
-    }
-  }
-  return splitTrailingAuthor(cleaned);
 }
 
 function inferMetadataFromName(name) {
-  const base = stripBookmarkedSuffix(titleCaseFromSlug(name));
-  const inferred = extractFilenameIdentifiers(base);
-  if (inferred.oclc && !els.oclc.value.trim()) {
-    els.oclc.value = inferred.oclc;
-  }
-  if (inferred.mmsId && !els.mmsId.value.trim()) {
-    els.mmsId.value = inferred.mmsId;
-  }
-
-  const withoutIdentifiers = stripFilenameFormatTail(inferred.text);
-
-  const commaParts = withoutIdentifiers.split(",").map((part) => part.trim()).filter(Boolean);
-  if (commaParts.length >= 3) {
-    if (!els.authorLast.value.trim()) els.authorLast.value = commaParts[0];
-    if (!els.authorFirst.value.trim()) els.authorFirst.value = commaParts[1];
-    if (!els.title.value.trim()) els.title.value = commaParts.slice(2).join(", ");
-  } else {
-    const parsed = splitTitleAuthor(withoutIdentifiers);
-    if (parsed) {
-      if (!els.authorLast.value.trim()) els.authorLast.value = parsed.last;
-      if (!els.authorFirst.value.trim()) els.authorFirst.value = parsed.first;
-      if (!els.title.value.trim()) els.title.value = parsed.title;
-    } else if (!els.title.value.trim()) {
-      els.title.value = withoutIdentifiers || base || "Untitled";
-    }
-  }
+  const inferred = extractFilenameIdentifiers(name);
+  setMetadataField("oclc", inferred.oclc);
+  setMetadataField("mmsId", inferred.mmsId);
+  setMetadataField("sourceCode", inferred.sourceCode);
   updateFilenamePreview();
 }
 
 function buildOutputFilename() {
   const last = cleanFilenamePart(els.authorLast.value);
   const first = cleanFilenamePart(els.authorFirst.value);
-  const title = cleanFilenamePart(els.title.value) || cleanFilenamePart(state.pdfName.replace(/\.pdf$/i, "")) || "Untitled";
+  const title = cleanFilenamePart(els.title.value) || "Untitled";
   const mmsId = normalizeIdentifier(els.mmsId.value);
   const oclc = cleanFilenamePart(els.oclc.value);
+  const sourceCode = normalizeSourceCode(els.sourceCode.value);
   const author = last && first ? `${last}, ${first}` : (last || first);
   const identifiers = [];
   if (mmsId) identifiers.push(`MMS ID ${mmsId}`);
   if (oclc) identifiers.push(`OCLC ${oclc}`);
+  if (sourceCode) identifiers.push(sourceCode);
   const pieces = [author, title, identifiers.join(", ")].filter(Boolean);
   let base = pieces.join(". ").replace(/\.\s*\./g, ".").trim();
   base = base.replace(/\s+\./g, ".").replace(/\s+/g, " ");
@@ -754,6 +775,120 @@ async function getAnalysisJob(jobId) {
   return parseJsonResponse(response, "Worker");
 }
 
+function joinMetadataParts(...parts) {
+  return parts
+    .map((part) => cleanFilenamePart(part))
+    .filter(Boolean)
+    .join(": ");
+}
+
+function equivalentText(a, b) {
+  const normalize = (value) => cleanFilenamePart(value).toLocaleLowerCase();
+  return normalize(a) && normalize(a) === normalize(b);
+}
+
+function bracketedEquivalent(original, equivalent) {
+  const base = cleanFilenamePart(original);
+  const bracket = cleanFilenamePart(equivalent);
+  if (!base) return bracket;
+  if (!bracket || equivalentText(base, bracket)) return base;
+  return `${base} [${bracket}]`;
+}
+
+function suggestedTitleValue(metadata) {
+  const original = joinMetadataParts(metadata?.title_original, metadata?.subtitle_original);
+  const english = joinMetadataParts(metadata?.title_english, metadata?.subtitle_english);
+  if (metadata?.is_english === false) return bracketedEquivalent(original, english);
+  return original || english;
+}
+
+function suggestedAuthorDisplay(metadata) {
+  const original = cleanFilenamePart(metadata?.author_original);
+  const romanized = cleanFilenamePart(metadata?.author_romanized);
+  const westernName = joinMetadataParts(metadata?.author_first, metadata?.author_last).replace(/: /g, " ");
+  if (metadata?.is_english === false) return bracketedEquivalent(original, romanized);
+  return original || westernName || romanized;
+}
+
+function metadataCreatorRoleCanNameBook(metadata) {
+  const role = cleanFilenamePart(metadata?.creator_role).toLowerCase();
+  return !role || ["author", "editor", "organization", "unknown"].includes(role);
+}
+
+function applyMetadataSuggestion(metadata) {
+  if (!metadata || metadata.error) return [];
+  const confidence = cleanFilenamePart(metadata.confidence).toLowerCase();
+  if (!["high", "medium"].includes(confidence)) return [];
+
+  const applied = [];
+  const title = suggestedTitleValue(metadata);
+  if (setMetadataField("title", title)) applied.push("title");
+
+  if (!metadataCreatorRoleCanNameBook(metadata)) {
+    updateFilenamePreview();
+    return applied;
+  }
+
+  const hasAuthor = Boolean(
+    cleanFilenamePart(metadata.author_original)
+      || cleanFilenamePart(metadata.author_romanized)
+      || cleanFilenamePart(metadata.author_last)
+      || cleanFilenamePart(metadata.author_first)
+  );
+  if (!hasAuthor) {
+    updateFilenamePreview();
+    return applied;
+  }
+
+  if (metadata.is_english === false) {
+    if (setMetadataField("authorLast", suggestedAuthorDisplay(metadata))) {
+      clearMetadataFieldIfAuto("authorFirst");
+      applied.push("author");
+    }
+  } else if (cleanFilenamePart(metadata.author_last) || cleanFilenamePart(metadata.author_first)) {
+    const lastApplied = setMetadataField("authorLast", metadata.author_last || suggestedAuthorDisplay(metadata));
+    const firstApplied = metadata.author_first
+      ? setMetadataField("authorFirst", metadata.author_first)
+      : clearMetadataFieldIfAuto("authorFirst");
+    if (lastApplied || firstApplied) applied.push("author");
+  } else if (setMetadataField("authorLast", suggestedAuthorDisplay(metadata))) {
+    clearMetadataFieldIfAuto("authorFirst");
+    applied.push("author");
+  }
+
+  updateFilenamePreview();
+  return [...new Set(applied)];
+}
+
+async function suggestMetadataForSource(normalizedUrl, runId) {
+  assertAnalysisRunActive(runId);
+  const password = requireStaffPassword();
+  addProgress("Looking for title/author on the first pages...");
+  const response = await fetch(`${WORKER_URL}/toc/metadata`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      password,
+      pdf_url: normalizedUrl,
+      max_pages: 8,
+    }),
+  });
+  const data = await parseJsonResponse(response, "Worker");
+  assertAnalysisRunActive(runId);
+
+  const metadata = data.suggested_metadata || {};
+  state.metadataSuggestion = metadata;
+  const applied = applyMetadataSuggestion(metadata);
+  const page = metadata.evidence_page ? ` page ${metadata.evidence_page}` : "";
+  if (applied.length) {
+    addProgress(`Applied ${applied.join(" and ")} from metadata scan${page}.`);
+  } else {
+    addProgress("Metadata scan did not find confident title/author fields to apply.");
+  }
+  refreshDebug();
+  return data;
+}
+
 async function analyzeSource(runId) {
   assertAnalysisRunActive(runId);
   state.startedAt = new Date();
@@ -983,6 +1118,10 @@ function buildDebugBundle() {
     `pdf_url=${state.pdfUrl || ""}`,
     `worker=${WORKER_URL}`,
     `output_filename=${buildOutputFilename()}`,
+    `source_code=${normalizeSourceCode(els.sourceCode.value)}`,
+    `metadata_confidence=${state.metadataSuggestion?.confidence || ""}`,
+    `metadata_language=${state.metadataSuggestion?.language || ""}`,
+    `metadata_evidence_page=${state.metadataSuggestion?.evidence_page || ""}`,
     `started_at=${state.startedAt ? state.startedAt.toISOString() : ""}`,
     `entries=${entries.length}`,
     `alignment_source=${analysis.alignment_source || ""}`,
@@ -1014,11 +1153,13 @@ async function resetForNextPdf() {
   state.pdfUrl = "";
   state.analysis = null;
   state.analysisJobId = null;
+  state.metadataSuggestion = null;
+  clearMetadataTracking();
   state.lastProgressCount = 0;
   state.startedAt = null;
 
   els.url.value = "";
-  [els.authorLast, els.authorFirst, els.title, els.mmsId, els.oclc].forEach((input) => {
+  [els.authorLast, els.authorFirst, els.title, els.mmsId, els.oclc, els.sourceCode].forEach((input) => {
     input.value = "";
   });
   setEntries([]);
@@ -1057,8 +1198,15 @@ async function runAnalysis(event) {
     state.analysisJobId = null;
     schedulePreviewAutoload(0);
     inferMetadataFromName(state.pdfName);
+    const metadataPromise = suggestMetadataForSource(normalizedUrl, runId).catch((error) => {
+      if (error.name !== "StaleAnalysisRun") {
+        addProgress(`Metadata scan skipped: ${error.message}`);
+      }
+      return null;
+    });
 
     state.analysis = await analyzeSource(runId);
+    await metadataPromise;
     assertAnalysisRunActive(runId);
     setEntries(state.analysis.entries || []);
     els.alignmentStatus.textContent = `${state.analysis.alignment_source || "unknown"} / ${state.analysis.alignment_confidence || "unknown"}`;
@@ -1091,8 +1239,19 @@ document.addEventListener("DOMContentLoaded", () => {
     els.passwordSaved.hidden = false;
   }
 
-  [els.authorLast, els.authorFirst, els.title, els.mmsId, els.oclc].forEach((input) => {
-    input.addEventListener("input", updateFilenamePreview);
+  [
+    [els.authorLast, "authorLast"],
+    [els.authorFirst, "authorFirst"],
+    [els.title, "title"],
+    [els.mmsId, "mmsId"],
+    [els.oclc, "oclc"],
+    [els.sourceCode, "sourceCode"],
+  ].forEach(([input, field]) => {
+    input.addEventListener("input", () => {
+      state.metadataTouched.add(field);
+      delete state.metadataAutoValues[field];
+      updateFilenamePreview();
+    });
   });
 
   els.staffPassword.addEventListener("change", () => {
@@ -1111,6 +1270,8 @@ document.addEventListener("DOMContentLoaded", () => {
     clearPreviewAutoload();
     state.pdfBytes = null;
     state.pdfBytesUrl = "";
+    state.metadataSuggestion = null;
+    clearAutomaticMetadataFields();
     resetPreview("Loading preview for the updated Dropbox link.");
     updateSourceLink();
     const name = filenameFromUrl(els.url.value.trim());
