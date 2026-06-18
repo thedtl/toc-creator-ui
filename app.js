@@ -1263,7 +1263,6 @@ document.addEventListener("DOMContentLoaded", () => {
       els.passwordSaved.hidden = true;
       setAccessStatus("Access not checked", "neutral");
     }
-    schedulePreviewAutoload();
   });
 
   els.url.addEventListener("input", () => {
@@ -1272,14 +1271,13 @@ document.addEventListener("DOMContentLoaded", () => {
     state.pdfBytesUrl = "";
     state.metadataSuggestion = null;
     clearAutomaticMetadataFields();
-    resetPreview("Loading preview for the updated Dropbox link.");
+    resetPreview("Preview will load when analysis starts.");
     updateSourceLink();
     const name = filenameFromUrl(els.url.value.trim());
     if (name && name !== "document.pdf") {
       state.pdfName = name;
       inferMetadataFromName(name);
     }
-    schedulePreviewAutoload();
   });
 
   els.form.addEventListener("submit", runAnalysis);
