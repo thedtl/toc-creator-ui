@@ -95,7 +95,7 @@ function addProgress(message) {
   const item = document.createElement("li");
   item.textContent = message;
   els.progressLog.appendChild(item);
-  item.scrollIntoView({ block: "nearest" });
+  els.progressLog.scrollTop = els.progressLog.scrollHeight;
 }
 
 function resetProgress(message) {
@@ -1002,6 +1002,9 @@ function addEntryRow(entry = {}) {
   row.querySelector(".entry-page").value = entry.page || "";
   row.querySelector(".entry-level").value = Number.isFinite(entry.level) ? entry.level : (entry.level || 0);
   row.querySelector(".preview-row").addEventListener("click", async () => {
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    const restoreScroll = () => window.scrollTo(scrollX, scrollY);
     try {
       await ensurePreviewDocument();
       const rowEntry = {
@@ -1013,9 +1016,13 @@ function addEntryRow(entry = {}) {
       if (pageIndex < 0) throw new Error(`Could not map "${rowEntry.page}" to a PDF page.`);
       await renderPreviewPage(pageIndex + 1);
       addProgress(`Previewing "${rowEntry.title || "row"}" at PDF page ${pageIndex + 1}.`);
+      restoreScroll();
+      requestAnimationFrame(restoreScroll);
     } catch (error) {
       setPreviewStatus(error.message, "error");
       addProgress(`Preview error: ${error.message}`);
+      restoreScroll();
+      requestAnimationFrame(restoreScroll);
     }
   });
   row.querySelector(".flag-row").addEventListener("click", () => {
