@@ -823,10 +823,16 @@ function metadataCreatorRoleCanNameBook(metadata) {
   return !role || ["author", "editor", "organization", "unknown"].includes(role);
 }
 
+function metadataHasVisibleEvidence(metadata) {
+  const page = Number(metadata?.evidence_page);
+  return Number.isFinite(page) && page > 0 && cleanFilenamePart(metadata?.evidence).length >= 8;
+}
+
 function applyMetadataSuggestion(metadata) {
   if (!metadata || metadata.error) return [];
   const confidence = cleanFilenamePart(metadata.confidence).toLowerCase();
   if (!["high", "medium"].includes(confidence)) return [];
+  if (!metadataHasVisibleEvidence(metadata)) return [];
 
   const applied = [];
   const title = suggestedTitleValue(metadata);
