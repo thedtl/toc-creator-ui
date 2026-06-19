@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-06-19 - Creator Role Automation
+
+### Changed
+
+- Metadata autofill now ignores translators, foreword/introduction/preface-style credits, organizations, unknown roles, and other non-author/editor creator labels.
+- Compiler credits are kept only when the metadata scan found no author or editor.
+- The contributor role dropdown now offers Author, Editor, and Compiler.
+- Public assets were cache-busted to `app.js?v=20260619-creator-roles` and `styles.css?v=20260619-creator-roles`.
+
 ## 2026-06-18 - Preview Behavior And Contributor Filenames
 
 ### Added

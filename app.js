@@ -30,10 +30,9 @@ const PREVIEW_AUTOLOAD_DELAY_MS = 650;
 const CONTRIBUTOR_ROLES = {
   author: { label: "Author" },
   editor: { label: "Editor", primarySingle: "ed.", primaryPlural: "eds.", secondary: "Edited by" },
-  translator: { label: "Translator", primarySingle: "trans.", primaryPlural: "trans.", secondary: "Translated by" },
   compiler: { label: "Compiler", primarySingle: "comp.", primaryPlural: "comps.", secondary: "Compiled by" },
 };
-const CONTRIBUTOR_ROLE_ORDER = ["author", "editor", "translator", "compiler"];
+const CONTRIBUTOR_ROLE_ORDER = ["author", "editor", "compiler"];
 
 function createStaleAnalysisError() {
   const error = new Error("Analysis was reset.");
@@ -454,22 +453,18 @@ function buildContributorCredits() {
   if (byRole.author.length) {
     return {
       primary: joinContributorNames(byRole.author, true),
-      afterTitle: CONTRIBUTOR_ROLE_ORDER
-        .filter((role) => role !== "author")
-        .map((role) => secondaryContributorCredit(role, byRole[role]))
+      afterTitle: ["editor"]
+        .map((role) => secondaryContributorCredit(role, byRole[role] || []))
         .filter(Boolean),
     };
   }
 
-  const primaryRole = CONTRIBUTOR_ROLE_ORDER.find((role) => byRole[role].length);
+  const primaryRole = byRole.editor.length ? "editor" : (byRole.compiler.length ? "compiler" : "");
   if (!primaryRole) return { primary: "", afterTitle: [] };
 
   return {
     primary: primaryContributorCredit(primaryRole, byRole[primaryRole]),
-    afterTitle: CONTRIBUTOR_ROLE_ORDER
-      .filter((role) => role !== primaryRole)
-      .map((role) => secondaryContributorCredit(role, byRole[role]))
-      .filter(Boolean),
+    afterTitle: [],
   };
 }
 
@@ -1021,27 +1016,28 @@ function suggestedAuthorDisplay(metadata) {
 
 function metadataCreatorRoleIsContributor(metadata) {
   const role = cleanFilenamePart(metadata?.creator_role).toLowerCase();
-  return !role || ["author", "editor", "translator", "compiler", "organization", "unknown"].includes(role);
+  return !role || ["author", "editor", "compiler"].includes(role);
 }
 
 function contributorRoleFromMetadata(metadata) {
   const role = cleanFilenamePart(metadata?.creator_role).toLowerCase();
   if (role.includes("edit")) return "editor";
-  if (role.includes("trans")) return "translator";
   if (role.includes("compil")) return "compiler";
-  return "author";
+  if (!role || role.includes("author")) return "author";
+  return "";
 }
 
 function contributorRoleFromMetadataContributor(contributor) {
   const role = cleanFilenamePart(contributor?.role).toLowerCase();
   if (role.includes("edit")) return "editor";
-  if (role.includes("trans")) return "translator";
   if (role.includes("compil")) return "compiler";
-  return "author";
+  if (!role || role.includes("author")) return "author";
+  return "";
 }
 
 function suggestedContributor(metadata) {
   const role = contributorRoleFromMetadata(metadata);
+  if (!role) return null;
   if (metadata.is_english === false) {
     return { role, last: suggestedAuthorDisplay(metadata), first: "" };
   }
@@ -1057,6 +1053,7 @@ function suggestedContributor(metadata) {
 
 function suggestedContributorFromMetadataContributor(contributor, metadata) {
   const role = contributorRoleFromMetadataContributor(contributor);
+  if (!role) return null;
   const original = cleanFilenamePart(contributor?.name_original);
   const romanized = cleanFilenamePart(contributor?.name_romanized);
   const first = cleanFilenamePart(contributor?.first);
@@ -1074,11 +1071,16 @@ function suggestedContributors(metadata) {
   const contributors = Array.isArray(metadata?.contributors)
     ? metadata.contributors
       .map((contributor) => suggestedContributorFromMetadataContributor(contributor, metadata))
+      .filter(Boolean)
       .filter((contributor) => cleanFilenamePart(contributor.last) || cleanFilenamePart(contributor.first))
     : [];
-  if (contributors.length) return contributors;
+  const primaryContributors = contributors.filter((contributor) => ["author", "editor"].includes(contributor.role));
+  if (primaryContributors.length) return primaryContributors;
+  const compilerContributors = contributors.filter((contributor) => contributor.role === "compiler");
+  if (compilerContributors.length) return compilerContributors;
 
   const legacyContributor = suggestedContributor(metadata);
+  if (!legacyContributor) return [];
   return cleanFilenamePart(legacyContributor.last) || cleanFilenamePart(legacyContributor.first)
     ? [legacyContributor]
     : [];
