@@ -9,6 +9,13 @@
 - The contributor role dropdown now offers Author, Editor, and Compiler.
 - Public assets were cache-busted to `app.js?v=20260619-creator-roles` and `styles.css?v=20260619-creator-roles`.
 
+### Deployed
+
+- UI commit: `c5f02a1 Narrow metadata creator roles`
+- Public site verified at `https://thedtl.github.io/toc-creator-ui/`
+- Published HTML loads `app.js?v=20260619-creator-roles` and `styles.css?v=20260619-creator-roles`.
+- Published JavaScript role order verified as Author, Editor, Compiler.
+
 ## 2026-06-18 - Preview Behavior And Contributor Filenames
 
 ### Added
