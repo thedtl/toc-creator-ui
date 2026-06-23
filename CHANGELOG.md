@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-06-23 - Dropbox API Source Access
+
+### Changed
+
+- ToC Creator now points at the Dropbox API-enabled Worker for staff analysis, metadata, feedback, and preview routes.
+- PDF preview now uses the Worker staff-only Dropbox API stream instead of minting a public-download-style proxy token.
+- Public assets were cache-busted to `app.js?v=20260623-dropbox-api` and `styles.css?v=20260623-dropbox-api`.
+
 ## 2026-06-19 - Creator Role Automation
 
 ### Changed

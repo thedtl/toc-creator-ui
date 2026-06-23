@@ -21,7 +21,7 @@ const state = {
   metadataAutoValues: {},
 };
 
-const WORKER_URL = "https://dtl-chapter-request.ccrawford.workers.dev";
+const WORKER_URL = "https://dtl-chapter-reader-dropbox-lab.reference-dfe.workers.dev";
 const PDFJS_WORKER_URL = "./vendor/pdf.worker.min.js?v=3.11.174";
 const JOB_POLL_INTERVAL_MS = 2500;
 const JOB_TIMEOUT_MS = 45 * 60 * 1000;
@@ -787,14 +787,8 @@ async function getProtectedPdfUrl(dropboxUrl) {
   const params = new URLSearchParams({
     password,
     dropbox: normalizeDropboxUrl(dropboxUrl),
-    start: "1",
-    end: "99999",
-    expires: "0",
   });
-  const response = await fetch(`${WORKER_URL}/sign?${params.toString()}`);
-  const data = await parseJsonResponse(response, "PDF proxy");
-  if (!data.token) throw new Error("PDF proxy did not return a token.");
-  return `${WORKER_URL}/?token=${encodeURIComponent(data.token)}`;
+  return `${WORKER_URL}/analyze?${params.toString()}`;
 }
 
 async function fetchPdfBytes(url) {
