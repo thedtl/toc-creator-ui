@@ -130,8 +130,13 @@ function elapsedSeconds() {
 function updateJobStatusText(status) {
   const label = status === "succeeded"
     ? "Analysis complete"
+    : status === "needs_review"
+      ? "Review required"
     : status === "failed"
+      || status === "failed_quality_gate"
       ? "Analysis failed"
+      : status === "cancelled"
+        ? "Analysis cancelled"
       : status === "queued"
         ? "Queued"
         : "Analyzing";
@@ -1185,15 +1190,15 @@ async function analyzeSource(runId) {
   let consecutivePollErrors = 0;
   let latest = started;
   while (Date.now() < deadline) {
-    if (latest.status === "succeeded") {
+    if (latest.status === "succeeded" || latest.status === "needs_review") {
       syncProgressMessages(latest.progress || []);
-      updateJobStatusText("succeeded");
+      updateJobStatusText(latest.status);
       if (!latest.result) throw new Error("Analysis job finished without a result.");
       return latest.result;
     }
-    if (latest.status === "failed") {
+    if (latest.status === "failed" || latest.status === "failed_quality_gate" || latest.status === "cancelled") {
       syncProgressMessages(latest.progress || []);
-      updateJobStatusText("failed");
+      updateJobStatusText(latest.status);
       throw new Error(latest.error || "Analysis job failed.");
     }
     await delay(JOB_POLL_INTERVAL_MS);
@@ -1525,9 +1530,13 @@ async function runAnalysis(event) {
     setEntries(state.analysis.entries || []);
     els.alignmentStatus.textContent = `${state.analysis.alignment_source || "unknown"} / ${state.analysis.alignment_confidence || "unknown"}`;
     updateLearningPanel();
-    els.downloadState.textContent = "Ready to create PDF";
+    const needsReview = state.analysis.quality_gate === "needs_review"
+      || state.analysis.publishability?.job_status === "needs_review";
+    els.downloadState.textContent = needsReview ? "Ready for review PDF" : "Ready to create PDF";
     els.createPdf.disabled = false;
-    addProgress(`Analysis complete: ${getEntriesFromTable().length} entries.`);
+    addProgress(needsReview
+      ? `Analysis complete: ${getEntriesFromTable().length} entries; review required.`
+      : `Analysis complete: ${getEntriesFromTable().length} entries.`);
     syncProgressMessages(state.analysis.progress || []);
     await metadataPromise;
   } catch (error) {

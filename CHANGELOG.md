@@ -10,7 +10,10 @@
   misleading zero-entry state.
 - Job-status polling now treats backend job heartbeats as live activity, so a
   long stage with no new detailed progress sentence does not look idle.
-- Public app asset was cache-busted to `app.js?v=20260624-job-heartbeat`.
+- `needs_review` is now treated as a completed analysis that can populate the
+  bookmark table and create a review PDF instead of waiting for a `succeeded`
+  status that will never arrive.
+- Public app asset was cache-busted to `app.js?v=20260624-needs-review`.
 
 ## 2026-06-23 - Dropbox API Source Access
 
