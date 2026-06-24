@@ -26,6 +26,7 @@ const PDFJS_WORKER_URL = "./vendor/pdf.worker.min.js?v=3.11.174";
 const JOB_POLL_INTERVAL_MS = 2500;
 const JOB_TIMEOUT_MS = 45 * 60 * 1000;
 const JOB_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+const JOB_POLL_RETRY_GRACE_MS = 5 * 60 * 1000;
 const PREVIEW_AUTOLOAD_DELAY_MS = 650;
 const CONTRIBUTOR_ROLES = {
   author: { label: "Author" },
@@ -756,12 +757,25 @@ async function parseJsonResponse(response, context) {
   try {
     data = JSON.parse(text);
   } catch {
-    throw new Error(`${context} returned non-JSON response: ${text.slice(0, 200)}`);
+    const error = new Error(`${context} returned non-JSON response: ${text.slice(0, 200)}`);
+    error.status = response.status;
+    error.retryable = response.status === 408 || response.status === 429 || response.status >= 500;
+    throw error;
   }
   if (!response.ok) {
-    throw new Error(data.detail || data.error || `HTTP ${response.status}`);
+    const error = new Error(data.detail || data.error || `HTTP ${response.status}`);
+    error.status = response.status;
+    error.retryable = response.status === 408 || response.status === 429 || response.status >= 500;
+    throw error;
   }
   return data;
+}
+
+function isRetryableJobPollError(error) {
+  const status = Number(error?.status) || 0;
+  if (status === 401 || status === 403) return false;
+  if (error?.retryable) return true;
+  return /Failed to fetch|Load failed|NetworkError|Service Unavailable|non-JSON response|backend job status failed/i.test(error?.message || "");
 }
 
 async function checkAccess() {
@@ -1164,6 +1178,8 @@ async function analyzeSource(runId) {
   let lastActivityAt = Date.now();
   let lastSeenProgressCount = Array.isArray(started.progress) ? started.progress.length : 0;
   let lastSeenStatus = started.status || "queued";
+  let firstPollErrorAt = null;
+  let consecutivePollErrors = 0;
   let latest = started;
   while (Date.now() < deadline) {
     if (latest.status === "succeeded") {
@@ -1179,7 +1195,30 @@ async function analyzeSource(runId) {
     }
     await delay(JOB_POLL_INTERVAL_MS);
     assertAnalysisRunActive(runId);
-    latest = await getAnalysisJob(jobId);
+    try {
+      latest = await getAnalysisJob(jobId);
+      if (consecutivePollErrors > 0) {
+        addProgress("Progress connection restored.");
+      }
+      firstPollErrorAt = null;
+      consecutivePollErrors = 0;
+    } catch (error) {
+      if (!isRetryableJobPollError(error)) throw error;
+      const now = Date.now();
+      firstPollErrorAt = firstPollErrorAt || now;
+      consecutivePollErrors += 1;
+      const retryElapsed = now - firstPollErrorAt;
+      if (retryElapsed > JOB_POLL_RETRY_GRACE_MS) {
+        throw new Error(`Lost contact with the analysis job after retrying progress updates. Last error: ${error.message}`);
+      }
+      if (consecutivePollErrors === 1) {
+        addProgress(`Progress update temporarily failed (${error.message}). Retrying without stopping the analysis...`);
+      } else if (consecutivePollErrors % 8 === 0) {
+        addProgress(`Still retrying progress updates (${Math.round(retryElapsed / 1000)}s since the first failure)...`);
+      }
+      updateJobStatusText(lastSeenStatus || "running");
+      continue;
+    }
     assertAnalysisRunActive(runId);
     const progressCount = Array.isArray(latest.progress) ? latest.progress.length : 0;
     const status = latest.status || "running";

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-06-24 - Job Poll Retry
+
+### Changed
+
+- Job-status polling now treats transient Worker/backend failures such as 503
+  and non-JSON Service Unavailable responses as retryable progress-channel
+  interruptions instead of immediately failing the analysis and showing a
+  misleading zero-entry state.
+- Public app asset was cache-busted to `app.js?v=20260624-job-poll-retry`.
+
 ## 2026-06-23 - Dropbox API Source Access
 
 ### Changed
