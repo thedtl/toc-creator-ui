@@ -27,6 +27,7 @@ const JOB_POLL_INTERVAL_MS = 2500;
 const JOB_TIMEOUT_MS = 45 * 60 * 1000;
 const JOB_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const JOB_POLL_RETRY_GRACE_MS = 5 * 60 * 1000;
+const JOB_STILL_WORKING_NOTICE_MS = 2 * 60 * 1000;
 const PREVIEW_AUTOLOAD_DELAY_MS = 650;
 const CONTRIBUTOR_ROLES = {
   author: { label: "Author" },
@@ -1178,6 +1179,8 @@ async function analyzeSource(runId) {
   let lastActivityAt = Date.now();
   let lastSeenProgressCount = Array.isArray(started.progress) ? started.progress.length : 0;
   let lastSeenStatus = started.status || "queued";
+  let lastSeenHeartbeatCount = Number(started.heartbeat_count) || 0;
+  let lastHeartbeatNoticeAt = 0;
   let firstPollErrorAt = null;
   let consecutivePollErrors = 0;
   let latest = started;
@@ -1222,10 +1225,20 @@ async function analyzeSource(runId) {
     assertAnalysisRunActive(runId);
     const progressCount = Array.isArray(latest.progress) ? latest.progress.length : 0;
     const status = latest.status || "running";
-    if (progressCount > lastSeenProgressCount || status !== lastSeenStatus) {
+    const heartbeatCount = Number(latest.heartbeat_count) || 0;
+    const heartbeatAdvanced = heartbeatCount > lastSeenHeartbeatCount;
+    if (progressCount > lastSeenProgressCount || status !== lastSeenStatus || heartbeatAdvanced) {
       lastActivityAt = Date.now();
+      if (heartbeatAdvanced && progressCount <= lastSeenProgressCount && status === lastSeenStatus) {
+        const now = Date.now();
+        if (now - lastHeartbeatNoticeAt > JOB_STILL_WORKING_NOTICE_MS) {
+          addProgress("Backend heartbeat received; analysis is still working in the current stage.");
+          lastHeartbeatNoticeAt = now;
+        }
+      }
       lastSeenProgressCount = progressCount;
       lastSeenStatus = status;
+      lastSeenHeartbeatCount = Math.max(lastSeenHeartbeatCount, heartbeatCount);
     }
     syncProgressMessages(latest.progress || []);
     updateJobStatusText(latest.status || "running");

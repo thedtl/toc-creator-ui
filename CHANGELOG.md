@@ -8,7 +8,9 @@
   and non-JSON Service Unavailable responses as retryable progress-channel
   interruptions instead of immediately failing the analysis and showing a
   misleading zero-entry state.
-- Public app asset was cache-busted to `app.js?v=20260624-job-poll-retry`.
+- Job-status polling now treats backend job heartbeats as live activity, so a
+  long stage with no new detailed progress sentence does not look idle.
+- Public app asset was cache-busted to `app.js?v=20260624-job-heartbeat`.
 
 ## 2026-06-23 - Dropbox API Source Access
 
