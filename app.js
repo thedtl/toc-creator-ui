@@ -24,6 +24,8 @@ const state = {
 const WORKER_URL = "https://dtl-chapter-reader-dropbox-lab.reference-dfe.workers.dev";
 const PDFJS_WORKER_URL = "./vendor/pdf.worker.min.js?v=3.11.174";
 const JOB_POLL_INTERVAL_MS = 2500;
+const JOB_START_RETRY_INTERVAL_MS = 3500;
+const JOB_START_RETRY_GRACE_MS = 2 * 60 * 1000;
 const JOB_TIMEOUT_MS = 45 * 60 * 1000;
 const JOB_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const JOB_POLL_RETRY_GRACE_MS = 5 * 60 * 1000;
@@ -132,6 +134,10 @@ function updateJobStatusText(status) {
     ? "Analysis complete"
     : status === "needs_review"
       ? "Review required"
+    : status === "starting"
+      ? "Starting analysis"
+    : status === "retrying"
+      ? "Retrying"
     : status === "failed"
       || status === "failed_quality_gate"
       ? "Analysis failed"
@@ -763,25 +769,29 @@ async function parseJsonResponse(response, context) {
   try {
     data = JSON.parse(text);
   } catch {
-    const error = new Error(`${context} returned non-JSON response: ${text.slice(0, 200)}`);
+    const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
+    const message = retryable
+      ? `${context} returned a temporary service response.`
+      : `${context} returned non-JSON response: ${text.slice(0, 200)}`;
+    const error = new Error(message);
     error.status = response.status;
-    error.retryable = response.status === 408 || response.status === 429 || response.status >= 500;
+    error.retryable = retryable;
     throw error;
   }
   if (!response.ok) {
     const error = new Error(data.detail || data.error || `HTTP ${response.status}`);
     error.status = response.status;
-    error.retryable = response.status === 408 || response.status === 429 || response.status >= 500;
+    error.retryable = Boolean(data.retryable) || response.status === 408 || response.status === 429 || response.status >= 500;
     throw error;
   }
   return data;
 }
 
-function isRetryableJobPollError(error) {
+function isRetryableJobError(error) {
   const status = Number(error?.status) || 0;
   if (status === 401 || status === 403) return false;
   if (error?.retryable) return true;
-  return /Failed to fetch|Load failed|NetworkError|Service Unavailable|non-JSON response|backend job status failed/i.test(error?.message || "");
+  return /Failed to fetch|Load failed|NetworkError|Service Unavailable|temporary service response|non-JSON response|backend job start failed|backend job status failed/i.test(error?.message || "");
 }
 
 async function checkAccess() {
@@ -974,6 +984,35 @@ async function startAnalysisJob() {
     }),
   });
   return parseJsonResponse(response, "Worker");
+}
+
+async function startAnalysisJobWithRetry(runId) {
+  const firstAttemptAt = Date.now();
+  let attempt = 0;
+  while (true) {
+    assertAnalysisRunActive(runId);
+    attempt += 1;
+    try {
+      const started = await startAnalysisJob();
+      if (attempt > 1) {
+        addProgress("Backend accepted the analysis job after retrying.");
+      }
+      return started;
+    } catch (error) {
+      if (!isRetryableJobError(error)) throw error;
+      const elapsed = Date.now() - firstAttemptAt;
+      if (elapsed > JOB_START_RETRY_GRACE_MS) {
+        throw new Error(`Could not start the analysis job after retrying. Last error: ${error.message}`);
+      }
+      updateJobStatusText("retrying");
+      if (attempt === 1) {
+        addProgress(`Backend was not ready to start the analysis job (${error.message}). Retrying...`);
+      } else if (attempt % 4 === 0) {
+        addProgress(`Still trying to start the analysis job (${Math.round(elapsed / 1000)}s elapsed)...`);
+      }
+      await delay(JOB_START_RETRY_INTERVAL_MS);
+    }
+  }
 }
 
 async function getAnalysisJob(jobId) {
@@ -1169,7 +1208,7 @@ async function analyzeSource(runId) {
   assertAnalysisRunActive(runId);
   state.startedAt = new Date();
   addProgress("Starting protected analysis job...");
-  const started = await startAnalysisJob();
+  const started = await startAnalysisJobWithRetry(runId);
   const jobId = started.job_id;
   if (!jobId) throw new Error("Worker did not return a job ID.");
   if (state.analysisRunId !== runId) {
@@ -1211,7 +1250,7 @@ async function analyzeSource(runId) {
       firstPollErrorAt = null;
       consecutivePollErrors = 0;
     } catch (error) {
-      if (!isRetryableJobPollError(error)) throw error;
+      if (!isRetryableJobError(error)) throw error;
       const now = Date.now();
       firstPollErrorAt = firstPollErrorAt || now;
       consecutivePollErrors += 1;
