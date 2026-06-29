@@ -4,6 +4,7 @@ const state = {
   pdfUrl: "",
   analysis: null,
   analysisJobId: null,
+  analysisJobStartedAt: null,
   lastProgressCount: 0,
   startedAt: null,
   previewDoc: null,
@@ -24,6 +25,7 @@ const state = {
 const WORKER_URL = "https://dtl-chapter-reader-dropbox-lab.reference-dfe.workers.dev";
 const PDFJS_WORKER_URL = "./vendor/pdf.worker.min.js?v=3.11.174";
 const JOB_POLL_INTERVAL_MS = 2500;
+const JOB_STATUS_NOT_FOUND_GRACE_MS = 90 * 1000;
 const JOB_START_RETRY_INTERVAL_MS = 3500;
 const JOB_START_RETRY_GRACE_MS = 2 * 60 * 1000;
 const JOB_TIMEOUT_MS = 45 * 60 * 1000;
@@ -794,6 +796,13 @@ function isRetryableJobError(error) {
   return /Failed to fetch|Load failed|NetworkError|Service Unavailable|temporary service response|non-JSON response|backend job start failed|backend job status failed/i.test(error?.message || "");
 }
 
+function isRecentStartedJobNotFound(error, jobId) {
+  const status = Number(error?.status) || 0;
+  if (status !== 404 || !/^Job not found$/i.test(error?.message || "")) return false;
+  if (!jobId || jobId !== state.analysisJobId || !state.analysisJobStartedAt) return false;
+  return Date.now() - state.analysisJobStartedAt.getTime() <= JOB_STATUS_NOT_FOUND_GRACE_MS;
+}
+
 async function checkAccess() {
   setAccessStatus("Checking...", "neutral");
   try {
@@ -1215,6 +1224,7 @@ async function analyzeSource(runId) {
     throw createStaleAnalysisError();
   }
   state.analysisJobId = jobId;
+  state.analysisJobStartedAt = new Date();
 
   syncProgressMessages(started.progress || []);
   updateJobStatusText(started.status || "queued");
@@ -1250,6 +1260,22 @@ async function analyzeSource(runId) {
       firstPollErrorAt = null;
       consecutivePollErrors = 0;
     } catch (error) {
+      if (isRecentStartedJobNotFound(error, jobId)) {
+        const now = Date.now();
+        firstPollErrorAt = firstPollErrorAt || now;
+        consecutivePollErrors += 1;
+        const retryElapsed = now - firstPollErrorAt;
+        if (consecutivePollErrors === 1) {
+          addProgress("Job was queued; reconnecting to status...");
+        } else if (consecutivePollErrors % 8 === 0) {
+          addProgress(`Still reconnecting to job status (${Math.round(retryElapsed / 1000)}s elapsed)...`);
+        }
+        updateJobStatusText("starting");
+        continue;
+      }
+      if (Number(error?.status) === 404 && /^Job not found$/i.test(error?.message || "") && jobId === state.analysisJobId) {
+        throw new Error("Job not found after reconnecting to status. Retry the analysis; the backend may have lost this queued job.");
+      }
       if (!isRetryableJobError(error)) throw error;
       const now = Date.now();
       firstPollErrorAt = firstPollErrorAt || now;
@@ -1512,6 +1538,7 @@ async function resetForNextPdf() {
   state.pdfUrl = "";
   state.analysis = null;
   state.analysisJobId = null;
+  state.analysisJobStartedAt = null;
   state.metadataSuggestion = null;
   clearMetadataTracking();
   state.lastProgressCount = 0;
@@ -1556,6 +1583,7 @@ async function runAnalysis(event) {
       await resetPreview("Loading preview while analysis runs.");
     }
     state.analysisJobId = null;
+    state.analysisJobStartedAt = null;
     schedulePreviewAutoload(0);
     const metadataPromise = suggestMetadataForSource(normalizedUrl, runId).catch((error) => {
       if (error.name !== "StaleAnalysisRun") {
