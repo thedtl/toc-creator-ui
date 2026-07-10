@@ -686,6 +686,45 @@ td input {
   color: #fff;
 }
 
+.essay-order-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.essay-order-control[hidden] {
+  display: none;
+}
+
+.essay-order-label {
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 700;
+  color: #20242b;
+}
+
+.essay-order-options {
+  flex-wrap: nowrap;
+  gap: 0;
+  justify-content: flex-start;
+}
+
+.essay-order-options button {
+  border-radius: 0;
+  margin-left: -1px;
+  padding-inline: 12px;
+}
+
+.essay-order-options button:first-child {
+  margin-left: 0;
+  border-radius: 6px 0 0 6px;
+}
+
+.essay-order-options button:last-child {
+  border-radius: 0 6px 6px 0;
+}
+
 .feedback-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(260px, 0.95fr);
@@ -953,6 +992,19 @@ textarea {
 
   .segmented-control {
     justify-content: flex-start;
+  }
+
+  .essay-order-control {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .essay-order-options {
+    width: 100%;
+  }
+
+  .essay-order-options button {
+    flex: 1 1 0;
   }
 
   .issue-row {

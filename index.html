@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>DTL ToC Creator</title>
-    <link rel="stylesheet" href="./styles.css?v=20260623-dropbox-api">
+    <link rel="stylesheet" href="./styles.css?v=20260710-essay-order-control">
     <script src="./vendor/pdf-lib.min.js?v=1.17.1"></script>
     <script src="./vendor/pdf.min.js?v=3.11.174"></script>
   </head>
@@ -142,6 +142,14 @@
               <span>Tokens: <strong id="learning-tokens">unknown</strong></span>
               <span id="feedback-state" class="feedback-state neutral">No feedback saved</span>
             </div>
+            <div id="essay-order-control" class="essay-order-control" hidden>
+              <span class="essay-order-label">Essay order</span>
+              <div id="essay-order-options" class="segmented-control essay-order-options" role="group" aria-label="Essay order">
+                <button type="button" data-essay-order="keep_source" class="active" aria-pressed="true">Keep source</button>
+                <button type="button" data-essay-order="author_first" aria-pressed="false">Author first</button>
+                <button type="button" data-essay-order="title_first" aria-pressed="false">Title first</button>
+              </div>
+            </div>
             <div class="table-wrap">
               <table>
                 <thead>
@@ -212,6 +220,6 @@
       <p>The Digital Theological Library. Built for fast ToC debugging and bookmark creation.</p>
     </footer>
 
-    <script src="./app.js?v=20260710-edited-volume-multiline-titles"></script>
+    <script src="./app.js?v=20260710-essay-order-control"></script>
   </body>
 </html>

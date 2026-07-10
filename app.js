@@ -20,6 +20,7 @@ const state = {
   metadataSuggestion: null,
   metadataTouched: new Set(),
   metadataAutoValues: {},
+  essayOrderMode: "keep_source",
 };
 
 const WORKER_URL = "https://dtl-chapter-reader-dropbox-lab.reference-dfe.workers.dev";
@@ -96,6 +97,8 @@ const els = {
   learningRoute: $("learning-route"),
   learningTokens: $("learning-tokens"),
   feedbackState: $("feedback-state"),
+  essayOrderControl: $("essay-order-control"),
+  essayOrderOptions: $("essay-order-options"),
   feedbackOptions: $("feedback-options"),
   feedbackNote: $("feedback-note"),
   feedbackIssues: $("feedback-issues"),
@@ -1349,25 +1352,93 @@ function normalizeEntryTitleLines(value) {
     .filter(Boolean);
 }
 
-function formatEntryTitleForEditor(entry = {}, analysisContext = {}) {
+function normalizeEssayOrderMode(value) {
+  return ["keep_source", "author_first", "title_first"].includes(value)
+    ? value
+    : "keep_source";
+}
+
+function formatEntryTitleForEditor(entry = {}, analysisContext = {}, requestedMode = "keep_source") {
   const lines = normalizeEntryTitleLines(entry.title);
   if (lines.length <= 1) return lines[0] || "";
 
-  if (!analysisUsesEditedVolumeTitles(analysisContext)) {
-    return lines.join(" ");
+  const sourceOrderTitle = lines.join(" ");
+  const mode = normalizeEssayOrderMode(requestedMode);
+  if (
+    !analysisUsesEditedVolumeTitles(analysisContext)
+    || mode === "keep_source"
+    || entry.bookmark === false
+  ) {
+    return sourceOrderTitle;
   }
 
-  const authorCredit = lines[0];
-  const essayTitle = lines.slice(1).join(" ");
+  const authorCredit = mode === "author_first" ? lines[0] : lines.at(-1);
+  const essayTitle = mode === "author_first"
+    ? lines.slice(1).join(" ")
+    : lines.slice(0, -1).join(" ");
   const displayedTitle = hasMatchingOuterQuotes(essayTitle)
     ? essayTitle
     : `"${essayTitle}"`;
   return `${authorCredit}, ${displayedTitle}`;
 }
 
+function nextAutomaticEntryTitle(
+  originalTitle,
+  currentTitle,
+  lastAutomaticTitle,
+  analysisContext,
+  mode,
+) {
+  if (currentTitle !== lastAutomaticTitle) return null;
+  return formatEntryTitleForEditor({ title: originalTitle }, analysisContext, mode);
+}
+
+function syncEssayOrderButtons() {
+  els.essayOrderOptions?.querySelectorAll("button[data-essay-order]").forEach((button) => {
+    const active = button.dataset.essayOrder === state.essayOrderMode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+
+function shouldShowEssayOrderControl(entries = [], analysisContext = {}) {
+  return analysisUsesEditedVolumeTitles(analysisContext)
+    && (entries || []).some(
+      (entry) => entry.bookmark !== false && normalizeEntryTitleLines(entry.title).length > 1,
+    );
+}
+
+function updateEssayOrderControl(entries = [], analysisContext = {}) {
+  if (!els.essayOrderControl) return;
+  els.essayOrderControl.hidden = !shouldShowEssayOrderControl(entries, analysisContext);
+}
+
+function setEssayOrderMode(mode, { applyToRows = true } = {}) {
+  state.essayOrderMode = normalizeEssayOrderMode(mode);
+  syncEssayOrderButtons();
+  if (!applyToRows) return;
+
+  els.entriesBody.querySelectorAll("tr").forEach((row) => {
+    const titleInput = row.querySelector(".entry-title");
+    const nextTitle = nextAutomaticEntryTitle(
+      row.dataset.originalTitle || "",
+      titleInput.value,
+      row.dataset.lastAutoTitle || "",
+      state.analysis || {},
+      state.essayOrderMode,
+    );
+    if (nextTitle === null) return;
+    titleInput.value = nextTitle;
+    row.dataset.lastAutoTitle = nextTitle;
+  });
+  updateEntryCount();
+  refreshDebug();
+}
+
 function setEntries(entries, analysisContext = {}) {
   els.entriesBody.innerHTML = "";
   (entries || []).forEach((entry) => addEntryRow(entry, analysisContext));
+  updateEssayOrderControl(entries, analysisContext);
   updateEntryCount();
 }
 
@@ -1393,7 +1464,13 @@ function addEntryRow(entry = {}, analysisContext = {}) {
   `;
   row.dataset.originalTitle = entry.title || "";
   row.dataset.originalPage = entry.page || "";
-  row.querySelector(".entry-title").value = formatEntryTitleForEditor(entry, analysisContext);
+  const formattedTitle = formatEntryTitleForEditor(
+    entry,
+    analysisContext,
+    state.essayOrderMode,
+  );
+  row.dataset.lastAutoTitle = formattedTitle;
+  row.querySelector(".entry-title").value = formattedTitle;
   row.querySelector(".entry-page").value = entry.page || "";
   row.querySelector(".entry-level").value = Number.isFinite(entry.level) ? entry.level : (entry.level || 0);
   row.querySelector(".preview-row").addEventListener("click", async () => {
@@ -1588,6 +1665,7 @@ async function resetForNextPdf() {
   clearMetadataTracking();
   state.lastProgressCount = 0;
   state.startedAt = null;
+  setEssayOrderMode("keep_source", { applyToRows: false });
 
   els.url.value = "";
   setContributorRows([{}]);
@@ -1639,6 +1717,7 @@ async function runAnalysis(event) {
 
     state.analysis = await analyzeSource(runId);
     assertAnalysisRunActive(runId);
+    setEssayOrderMode("keep_source", { applyToRows: false });
     setEntries(state.analysis.entries || [], state.analysis);
     els.alignmentStatus.textContent = `${state.analysis.alignment_source || "unknown"} / ${state.analysis.alignment_confidence || "unknown"}`;
     updateLearningPanel();
@@ -1759,7 +1838,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   els.addEntry.addEventListener("click", () => {
-    addEntryRow({ title: "", page: "", level: 0 });
+    addEntryRow({ title: "", page: "", level: 0 }, state.analysis || {});
     updateEntryCount();
     refreshDebug();
   });
@@ -1767,6 +1846,12 @@ document.addEventListener("DOMContentLoaded", () => {
   els.entriesBody.addEventListener("input", () => {
     updateEntryCount();
     refreshDebug();
+  });
+
+  els.essayOrderOptions?.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-essay-order]");
+    if (!button) return;
+    setEssayOrderMode(button.dataset.essayOrder);
   });
 
   els.feedbackOptions.addEventListener("click", (event) => {
@@ -1839,5 +1924,6 @@ document.addEventListener("DOMContentLoaded", () => {
   updateFilenamePreview();
   updateSourceLink();
   resetFeedbackState();
+  setEssayOrderMode("keep_source", { applyToRows: false });
   updatePreviewControls();
 });
