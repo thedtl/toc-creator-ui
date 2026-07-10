@@ -1320,9 +1320,54 @@ async function analyzeSource(runId) {
   throw new Error("Analysis timed out after 45 minutes while waiting for job status.");
 }
 
-function setEntries(entries) {
+function analysisUsesEditedVolumeTitles(analysisContext = {}) {
+  const explicitType = analysisContext.document_type || analysisContext.doc_type;
+  if (typeof explicitType === "string" && explicitType.trim()) {
+    return explicitType.trim().toLowerCase().replace(/[\s-]+/g, "_") === "edited_volume";
+  }
+  return analysisContext.hierarchy_diagnostics?.reason === "doc_type=edited_volume";
+}
+
+function hasMatchingOuterQuotes(value) {
+  const quotePairs = [
+    ['"', '"'],
+    ["“", "”"],
+    ["‘", "’"],
+    ["'", "'"],
+  ];
+  return quotePairs.some(([opening, closing]) => (
+    value.length >= opening.length + closing.length
+    && value.startsWith(opening)
+    && value.endsWith(closing)
+  ));
+}
+
+function normalizeEntryTitleLines(value) {
+  return String(value || "")
+    .split(/\r\n?|\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function formatEntryTitleForEditor(entry = {}, analysisContext = {}) {
+  const lines = normalizeEntryTitleLines(entry.title);
+  if (lines.length <= 1) return lines[0] || "";
+
+  if (!analysisUsesEditedVolumeTitles(analysisContext)) {
+    return lines.join(" ");
+  }
+
+  const authorCredit = lines[0];
+  const essayTitle = lines.slice(1).join(" ");
+  const displayedTitle = hasMatchingOuterQuotes(essayTitle)
+    ? essayTitle
+    : `"${essayTitle}"`;
+  return `${authorCredit}, ${displayedTitle}`;
+}
+
+function setEntries(entries, analysisContext = {}) {
   els.entriesBody.innerHTML = "";
-  (entries || []).forEach((entry) => addEntryRow(entry));
+  (entries || []).forEach((entry) => addEntryRow(entry, analysisContext));
   updateEntryCount();
 }
 
@@ -1334,7 +1379,7 @@ function iconSvg(name) {
   return icons[name] || "";
 }
 
-function addEntryRow(entry = {}) {
+function addEntryRow(entry = {}, analysisContext = {}) {
   const row = document.createElement("tr");
   row.innerHTML = `
     <td><input class="entry-title" type="text"></td>
@@ -1348,7 +1393,7 @@ function addEntryRow(entry = {}) {
   `;
   row.dataset.originalTitle = entry.title || "";
   row.dataset.originalPage = entry.page || "";
-  row.querySelector(".entry-title").value = entry.title || "";
+  row.querySelector(".entry-title").value = formatEntryTitleForEditor(entry, analysisContext);
   row.querySelector(".entry-page").value = entry.page || "";
   row.querySelector(".entry-level").value = Number.isFinite(entry.level) ? entry.level : (entry.level || 0);
   row.querySelector(".preview-row").addEventListener("click", async () => {
@@ -1594,7 +1639,7 @@ async function runAnalysis(event) {
 
     state.analysis = await analyzeSource(runId);
     assertAnalysisRunActive(runId);
-    setEntries(state.analysis.entries || []);
+    setEntries(state.analysis.entries || [], state.analysis);
     els.alignmentStatus.textContent = `${state.analysis.alignment_source || "unknown"} / ${state.analysis.alignment_confidence || "unknown"}`;
     updateLearningPanel();
     const needsReview = state.analysis.quality_gate === "needs_review"
