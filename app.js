@@ -1383,14 +1383,14 @@ function formatEntryTitleForEditor(entry = {}, analysisContext = {}, requestedMo
 }
 
 function nextAutomaticEntryTitle(
-  originalTitle,
+  originalEntry,
   currentTitle,
   lastAutomaticTitle,
   analysisContext,
   mode,
 ) {
   if (currentTitle !== lastAutomaticTitle) return null;
-  return formatEntryTitleForEditor({ title: originalTitle }, analysisContext, mode);
+  return formatEntryTitleForEditor(originalEntry, analysisContext, mode);
 }
 
 function syncEssayOrderButtons() {
@@ -1421,7 +1421,10 @@ function setEssayOrderMode(mode, { applyToRows = true } = {}) {
   els.entriesBody.querySelectorAll("tr").forEach((row) => {
     const titleInput = row.querySelector(".entry-title");
     const nextTitle = nextAutomaticEntryTitle(
-      row.dataset.originalTitle || "",
+      {
+        title: row.dataset.originalTitle || "",
+        bookmark: row.dataset.originalBookmark !== "false",
+      },
       titleInput.value,
       row.dataset.lastAutoTitle || "",
       state.analysis || {},
@@ -1463,6 +1466,7 @@ function addEntryRow(entry = {}, analysisContext = {}) {
     </td>
   `;
   row.dataset.originalTitle = entry.title || "";
+  row.dataset.originalBookmark = String(entry.bookmark !== false);
   row.dataset.originalPage = entry.page || "";
   const formattedTitle = formatEntryTitleForEditor(
     entry,
