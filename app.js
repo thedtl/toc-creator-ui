@@ -1,7 +1,45 @@
+const LEARNING_FRONTEND_VERSION = "20260718-learning-capture-essay-order";
+
+function newLearningIdentity(prefix = "local") {
+  return `${prefix}:${crypto.randomUUID()}`;
+}
+
+function learningEntryFromValues(title, page, level, learningId, parentIdentity = "") {
+  return { title: title.trim(), page: page.trim(), level: parseInt(level || "0", 10) || 0,
+    learning_id: learningId, parent_identity: parentIdentity || "" };
+}
+
+async function withOneTransportRetry(operation) {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!error.transportFailure) throw error;
+    return operation();
+  }
+}
+
+async function createPdfThenCapture(createPdf, capture, onCaptureError = () => {}) {
+  let created = null;
+  let pdfError = null;
+  try {
+    created = await createPdf();
+  } catch (error) {
+    pdfError = error;
+  }
+  try {
+    await capture(created, pdfError);
+  } catch (error) {
+    onCaptureError(error);
+  }
+  if (pdfError) throw pdfError;
+  return created;
+}
+
 const state = {
   pdfBytes: null,
   pdfName: "",
   pdfUrl: "",
+  originalSourceUrl: "",
   analysis: null,
   analysisJobId: null,
   analysisJobStartedAt: null,
@@ -329,6 +367,36 @@ async function saveRunFeedback() {
   setFeedbackState("Feedback saved and submitted.", "saved");
   addProgress(`Feedback saved for run ${runId.slice(0, 12)}.`);
   return result;
+}
+
+async function saveAutomaticFinalization(finalizationId, finalEntries, pdfGeneration, finalizedAt) {
+  const runId = currentRunId();
+  if (!runId) throw new Error("No completed run is available.");
+  const payload = {
+    password: requireStaffPassword(),
+    run_id: runId,
+    finalization_id: finalizationId,
+    finalized_at: finalizedAt,
+    original_entries: Array.isArray(state.analysis?.entries) ? state.analysis.entries : [],
+    original_bookmark_sha256: state.analysis?.learning_capture?.original_bookmark_sha256 || "",
+    edited_entries: finalEntries,
+    frontend_version: LEARNING_FRONTEND_VERSION,
+    pdf_generation: pdfGeneration,
+  };
+  return withOneTransportRetry(async () => {
+    let response;
+    try {
+      response = await fetch(`${WORKER_URL}/toc/run-feedback`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      });
+    } catch (error) {
+      error.transportFailure = true;
+      throw error;
+    }
+    const result = await parseJsonResponse(response, "Worker");
+    if (!result.ok) throw new Error(result.error || "Automatic learning capture failed.");
+    return result;
+  });
 }
 
 function normalizeDropboxUrl(url) {
@@ -980,8 +1048,10 @@ function schedulePreviewAutoload(delay = PREVIEW_AUTOLOAD_DELAY_MS) {
 
 async function startAnalysisJob() {
   const password = requireStaffPassword();
-  const normalizedUrl = normalizeDropboxUrl(els.url.value.trim());
+  const originalSourceUrl = els.url.value.trim();
+  const normalizedUrl = normalizeDropboxUrl(originalSourceUrl);
   if (!normalizedUrl) throw new Error("Paste a Dropbox PDF link first.");
+  state.originalSourceUrl = originalSourceUrl;
   state.pdfUrl = normalizedUrl;
   state.pdfName = filenameFromUrl(normalizedUrl);
 
@@ -991,6 +1061,7 @@ async function startAnalysisJob() {
     body: JSON.stringify({
       password,
       pdf_url: normalizedUrl,
+      original_source_url: originalSourceUrl,
       max_pages: 100,
       skip_bookmarks: false,
     }),
@@ -1393,6 +1464,28 @@ function nextAutomaticEntryTitle(
   return formatEntryTitleForEditor(originalEntry, analysisContext, mode);
 }
 
+function buildAutomaticTitleTransformations(rows, essayOrderMode) {
+  return [...rows].flatMap((row) => {
+    const originalTitle = row.dataset.originalTitle || "";
+    const automaticTitle = row.dataset.lastAutoTitle || originalTitle;
+    if (originalTitle === automaticTitle) return [];
+    const finalTitle = row.querySelector(".entry-title").value.trim();
+    const manuallyChanged = row.dataset.manualTitleEdited === "true";
+    const transformationMode = row.dataset.lastAutoMode || essayOrderMode;
+    return [{
+      identity: row.dataset.learningId,
+      transformation_type: transformationMode === "keep_source"
+        ? "multiline_title_normalization" : "essay_order_formatting",
+      essay_order_mode: transformationMode,
+      original_title: originalTitle,
+      automatic_title: automaticTitle,
+      final_title: finalTitle,
+      final_title_equals_automatic: finalTitle === automaticTitle,
+      manually_changed_after_transform: manuallyChanged,
+    }];
+  });
+}
+
 function syncEssayOrderButtons() {
   els.essayOrderOptions?.querySelectorAll("button[data-essay-order]").forEach((button) => {
     const active = button.dataset.essayOrder === state.essayOrderMode;
@@ -1433,6 +1526,7 @@ function setEssayOrderMode(mode, { applyToRows = true } = {}) {
     if (nextTitle === null) return;
     titleInput.value = nextTitle;
     row.dataset.lastAutoTitle = nextTitle;
+    row.dataset.lastAutoMode = state.essayOrderMode;
   });
   updateEntryCount();
   refreshDebug();
@@ -1468,12 +1562,16 @@ function addEntryRow(entry = {}, analysisContext = {}) {
   row.dataset.originalTitle = entry.title || "";
   row.dataset.originalBookmark = String(entry.bookmark !== false);
   row.dataset.originalPage = entry.page || "";
+  row.dataset.learningId = entry.learning_id || entry.identity || newLearningIdentity();
+  row.dataset.parentIdentity = entry.parent_identity || entry.parent_id || "";
+  row.dataset.manualTitleEdited = "false";
   const formattedTitle = formatEntryTitleForEditor(
     entry,
     analysisContext,
     state.essayOrderMode,
   );
   row.dataset.lastAutoTitle = formattedTitle;
+  row.dataset.lastAutoMode = state.essayOrderMode;
   row.querySelector(".entry-title").value = formattedTitle;
   row.querySelector(".entry-page").value = entry.page || "";
   row.querySelector(".entry-level").value = Number.isFinite(entry.level) ? entry.level : (entry.level || 0);
@@ -1514,11 +1612,9 @@ function addEntryRow(entry = {}, analysisContext = {}) {
 
 function getEntriesFromTable() {
   return [...els.entriesBody.querySelectorAll("tr")]
-    .map((row) => ({
-      title: row.querySelector(".entry-title").value.trim(),
-      page: row.querySelector(".entry-page").value.trim(),
-      level: parseInt(row.querySelector(".entry-level").value || "0", 10) || 0,
-    }))
+    .map((row) => learningEntryFromValues(row.querySelector(".entry-title").value,
+      row.querySelector(".entry-page").value, row.querySelector(".entry-level").value,
+      row.dataset.learningId, row.dataset.parentIdentity))
     .filter((entry) => entry.title && entry.page);
 }
 
@@ -1567,6 +1663,9 @@ async function ensurePdfBytes() {
 
 async function createBookmarkedPdf() {
   const entries = getEntriesFromTable();
+  const editorContext = { essay_order_mode: state.essayOrderMode,
+    automatic_title_transformations: buildAutomaticTitleTransformations(
+      els.entriesBody.querySelectorAll("tr"), state.essayOrderMode) };
   if (!entries.length) throw new Error("No bookmark rows are available.");
   if (!window.PDFLib) throw new Error("PDF creation library did not load. Refresh the page and try again.");
   const pdfBytes = await ensurePdfBytes();
@@ -1614,7 +1713,11 @@ async function createBookmarkedPdf() {
   link.download = buildOutputFilename();
   link.click();
   setTimeout(() => URL.revokeObjectURL(link.href), 5000);
-  return outlineItems.length;
+  return {
+    count: outlineItems.length,
+    entries: validEntries.map(({ pageIndex, ...entry }) => entry),
+    editorContext,
+  };
 }
 
 function buildDebugBundle() {
@@ -1662,6 +1765,7 @@ async function resetForNextPdf() {
   state.pdfBytesUrl = "";
   state.pdfName = "";
   state.pdfUrl = "";
+  state.originalSourceUrl = "";
   state.analysis = null;
   state.analysisJobId = null;
   state.analysisJobStartedAt = null;
@@ -1847,7 +1951,10 @@ document.addEventListener("DOMContentLoaded", () => {
     refreshDebug();
   });
 
-  els.entriesBody.addEventListener("input", () => {
+  els.entriesBody.addEventListener("input", (event) => {
+    if (event.target.classList.contains("entry-title")) {
+      event.target.closest("tr").dataset.manualTitleEdited = "true";
+    }
     updateEntryCount();
     refreshDebug();
   });
@@ -1902,10 +2009,27 @@ document.addEventListener("DOMContentLoaded", () => {
   els.createPdf.addEventListener("click", async () => {
     els.downloadState.textContent = "Creating PDF";
     addProgress("Creating bookmarked PDF in browser...");
+    const finalizationId = newLearningIdentity("finalization");
+    const finalizedAt = new Date().toISOString();
     try {
-      const count = await createBookmarkedPdf();
-      els.downloadState.textContent = `Downloaded ${count} bookmarks`;
-      addProgress(`Download started with ${count} bookmarks.`);
+      const created = await createPdfThenCapture(
+        createBookmarkedPdf,
+        (result, error) => saveAutomaticFinalization(
+          finalizationId,
+          result?.entries || getEntriesFromTable(),
+          { success: !error, bookmark_count: result?.count || 0, error: error?.message || "",
+            editor_context: result?.editorContext || { essay_order_mode: state.essayOrderMode,
+              automatic_title_transformations: buildAutomaticTitleTransformations(
+                els.entriesBody.querySelectorAll("tr"), state.essayOrderMode) } },
+          finalizedAt,
+        ),
+        (error) => {
+          setFeedbackState("Learning capture unavailable.", "error");
+          addProgress(`Learning capture error: ${error.message}`);
+        },
+      );
+      els.downloadState.textContent = `Downloaded ${created.count} bookmarks`;
+      addProgress(`Download started with ${created.count} bookmarks.`);
     } catch (error) {
       els.downloadState.textContent = "PDF creation failed";
       addProgress(`PDF creation error: ${error.message}`);
