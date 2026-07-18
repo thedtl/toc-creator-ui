@@ -1,4 +1,4 @@
-const LEARNING_FRONTEND_VERSION = "20260718-learning-capture-essay-order";
+const LEARNING_FRONTEND_VERSION = "20260718-failed-run-id";
 
 function newLearningIdentity(prefix = "local") {
   return `${prefix}:${crypto.randomUUID()}`;
@@ -132,6 +132,7 @@ const els = {
   previewCanvas: $("preview-canvas"),
   previewEmpty: $("preview-empty"),
   learningRunId: $("learning-run-id"),
+  copyRunId: $("copy-run-id"),
   learningRoute: $("learning-route"),
   learningTokens: $("learning-tokens"),
   feedbackState: $("feedback-state"),
@@ -198,7 +199,21 @@ function formatNumber(value) {
 }
 
 function currentRunId() {
-  return state.analysis?.run_id || state.analysisJobId || "";
+  return state.analysisJobId || state.analysis?.run_id || "";
+}
+
+function renderRunId() {
+  const runId = currentRunId();
+  els.learningRunId.textContent = runId || "none";
+  els.learningRunId.title = runId;
+  if (els.copyRunId) els.copyRunId.disabled = !runId;
+}
+
+function setActiveAnalysisJobId(jobId, runId) {
+  assertAnalysisRunActive(runId);
+  state.analysisJobId = jobId || null;
+  state.analysisJobStartedAt = jobId ? new Date() : null;
+  renderRunId();
 }
 
 function routeSummary(analysis = state.analysis) {
@@ -251,8 +266,7 @@ function updateLearningPanel() {
   const runId = currentRunId();
   const usage = analysis?.gemini_usage || {};
   const totalTokens = usage.tokens?.total_token_count;
-  els.learningRunId.textContent = runId ? runId.slice(0, 12) : "none";
-  els.learningRunId.title = runId || "";
+  renderRunId();
   els.learningRoute.textContent = routeSummary(analysis);
   els.learningTokens.textContent = formatNumber(totalTokens);
   els.saveFeedback.disabled = !runId;
@@ -1297,8 +1311,7 @@ async function analyzeSource(runId) {
   if (state.analysisRunId !== runId) {
     throw createStaleAnalysisError();
   }
-  state.analysisJobId = jobId;
-  state.analysisJobStartedAt = new Date();
+  setActiveAnalysisJobId(jobId, runId);
 
   syncProgressMessages(started.progress || []);
   updateJobStatusText(started.status || "queued");
@@ -1769,6 +1782,7 @@ async function resetForNextPdf() {
   state.analysis = null;
   state.analysisJobId = null;
   state.analysisJobStartedAt = null;
+  renderRunId();
   state.metadataSuggestion = null;
   clearMetadataTracking();
   state.lastProgressCount = 0;
@@ -1815,6 +1829,7 @@ async function runAnalysis(event) {
     }
     state.analysisJobId = null;
     state.analysisJobStartedAt = null;
+    renderRunId();
     schedulePreviewAutoload(0);
     const metadataPromise = suggestMetadataForSource(normalizedUrl, runId).catch((error) => {
       if (error.name !== "StaleAnalysisRun") {

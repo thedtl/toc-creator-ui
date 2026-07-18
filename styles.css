@@ -381,6 +381,14 @@ textarea:focus {
   overflow-wrap: anywhere;
 }
 
+.learning-summary .run-id-summary {
+  grid-column: span 2;
+}
+
+.run-id-summary .copy-button {
+  margin-left: auto;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;

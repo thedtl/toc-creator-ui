@@ -98,8 +98,8 @@ test("capture is nonblocking and retries only one transport failure", async () =
 
 test("combined marker and immutable-finalization wiring are synchronized", () => {
   const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  assert.match(source, /LEARNING_FRONTEND_VERSION = "20260718-learning-capture-essay-order"/);
-  assert.match(html, /app\.js\?v=20260718-learning-capture-essay-order/);
+  assert.match(source, /LEARNING_FRONTEND_VERSION = "20260718-failed-run-id"/);
+  assert.match(html, /app\.js\?v=20260718-failed-run-id/);
   assert.match(source, /row\.dataset\.learningId = entry\.learning_id \|\| entry\.identity/);
   assert.match(source, /original_source_url: originalSourceUrl/);
   assert.match(source, /result\?\.entries \|\| getEntriesFromTable\(\)/);

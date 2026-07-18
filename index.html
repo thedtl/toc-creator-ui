@@ -137,7 +137,9 @@
               <span id="download-state">No output yet</span>
             </div>
             <div class="learning-summary" aria-live="polite">
-              <span>Run: <strong id="learning-run-id">none</strong></span>
+              <span class="run-id-summary">Run ID: <strong id="learning-run-id">none</strong>
+                <button id="copy-run-id" class="copy-button" type="button" data-copy-target="learning-run-id" disabled>Copy</button>
+              </span>
               <span>Route: <strong id="learning-route">not run</strong></span>
               <span>Tokens: <strong id="learning-tokens">unknown</strong></span>
               <span id="feedback-state" class="feedback-state neutral">No feedback saved</span>
@@ -220,6 +222,6 @@
       <p>The Digital Theological Library. Built for fast ToC debugging and bookmark creation.</p>
     </footer>
 
-    <script src="./app.js?v=20260718-learning-capture-essay-order"></script>
+    <script src="./app.js?v=20260718-failed-run-id"></script>
   </body>
 </html>
