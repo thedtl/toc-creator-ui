@@ -52,9 +52,6 @@ const state = {
   previewLoadId: 0,
   pdfBytesUrl: "",
   analysisRunId: 0,
-  feedbackOutcome: "",
-  feedbackIssues: [],
-  feedbackSaveTimer: null,
   metadataSuggestion: null,
   metadataTouched: new Set(),
   metadataAutoValues: {},
@@ -135,14 +132,9 @@ const els = {
   copyRunId: $("copy-run-id"),
   learningRoute: $("learning-route"),
   learningTokens: $("learning-tokens"),
-  feedbackState: $("feedback-state"),
+  reviewNotice: $("review-notice"),
   essayOrderControl: $("essay-order-control"),
   essayOrderOptions: $("essay-order-options"),
-  feedbackOptions: $("feedback-options"),
-  feedbackNote: $("feedback-note"),
-  feedbackIssues: $("feedback-issues"),
-  clearFeedbackIssues: $("clear-feedback-issues"),
-  saveFeedback: $("save-feedback"),
 };
 
 function addProgress(message) {
@@ -224,163 +216,94 @@ function routeSummary(analysis = state.analysis) {
   return analysis ? "unknown" : "not run";
 }
 
-function setFeedbackState(text, kind = "neutral") {
-  if (!els.feedbackState) return;
-  els.feedbackState.textContent = text;
-  els.feedbackState.className = `feedback-state ${kind}`;
-}
-
-function resetFeedbackState() {
-  state.feedbackOutcome = "";
-  state.feedbackIssues = [];
-  if (state.feedbackSaveTimer) {
-    clearTimeout(state.feedbackSaveTimer);
-    state.feedbackSaveTimer = null;
-  }
-  if (els.feedbackNote) els.feedbackNote.value = "";
-  setFeedbackState("No feedback saved", "neutral");
-  if (els.saveFeedback) els.saveFeedback.textContent = "Save feedback";
-  document.querySelectorAll("#feedback-options button").forEach((button) => {
-    button.classList.remove("active");
-  });
-  renderFeedbackIssues();
-  updateLearningPanel();
-}
-
-function rowMatchesFeedbackIssue(row, issue) {
-  const title = row.querySelector(".entry-title").value.trim();
-  const currentPage = row.querySelector(".entry-page").value.trim();
-  const originalPage = row.dataset.originalPage || currentPage;
-  return issue.title === title && issue.returned_page === originalPage;
-}
-
-function syncFlagButtons() {
-  document.querySelectorAll("#entries-body tr").forEach((row) => {
-    const flagged = state.feedbackIssues.some((issue) => rowMatchesFeedbackIssue(row, issue));
-    row.querySelector(".flag-row")?.classList.toggle("flagged", flagged);
-  });
-}
-
 function updateLearningPanel() {
   const analysis = state.analysis;
   const runId = currentRunId();
   const usage = analysis?.gemini_usage || {};
   const totalTokens = usage.tokens?.total_token_count;
   renderRunId();
-  els.learningRoute.textContent = routeSummary(analysis);
-  els.learningTokens.textContent = formatNumber(totalTokens);
-  els.saveFeedback.disabled = !runId;
+  if (els.learningRoute) els.learningRoute.textContent = routeSummary(analysis);
+  if (els.learningTokens) els.learningTokens.textContent = formatNumber(totalTokens);
 }
 
-function renderFeedbackIssues() {
-  if (!els.feedbackIssues) return;
-  els.feedbackIssues.innerHTML = "";
-  if (!state.feedbackIssues.length) {
-    const empty = document.createElement("li");
-    empty.className = "empty-issue";
-    empty.textContent = "No rows flagged.";
-    els.feedbackIssues.appendChild(empty);
-    syncFlagButtons();
+function humanReviewReason(reason) {
+  const normalized = String(reason || "").trim().toLowerCase();
+  if (!normalized || normalized === "quality_gate:needs_review") return "";
+  if (normalized.includes("low_alignment_confidence")
+      || normalized.includes("capped_alignment_confidence")) {
+    return "Some page numbers could not be confirmed confidently.";
+  }
+  if (normalized.includes("unresolved_major_unit_gap")) {
+    return "A possible missing section needs checking.";
+  }
+  if (normalized.includes("boundary") && normalized.includes("unresolved")) {
+    return "The table-of-contents page range needs checking.";
+  }
+  if (normalized.includes("zero_safe_editable_rows")) {
+    return "No bookmarks were detected; you can add them manually.";
+  }
+  if (normalized.includes("failed_quality_gate_with_safe_editable_rows")) {
+    return "Some recovered bookmarks need checking.";
+  }
+  if (normalized.includes("bookmark_file_withheld")
+      || normalized.includes("legacy_")) {
+    return "";
+  }
+  return String(reason)
+    .replace(/^quality_gate:/i, "")
+    .replaceAll("_", " ")
+    .replace(/\s+/g, " ")
+    .replace(/^./, (character) => character.toUpperCase()) + ".";
+}
+
+function updateReviewNotice() {
+  if (!els.reviewNotice) return;
+  const analysis = state.analysis || {};
+  const rows = getVisibleEditorRows();
+  const missingTitles = rows.filter((entry) => !entry.title).length;
+  const missingPages = rows.filter((entry) => !entry.page).length;
+  const invalidLevels = rows.filter((entry) =>
+    !Number.isInteger(entry.level) || entry.level < 0).length;
+  const needsReview = analysis.quality_gate === "needs_review"
+    || analysis.publishability?.job_status === "needs_review"
+    || analysis.recovered_execution_failure?.status === "failed"
+    || missingTitles > 0
+    || missingPages > 0
+    || invalidLevels > 0;
+
+  if (!needsReview) {
+    els.reviewNotice.hidden = true;
+    els.reviewNotice.textContent = "";
     return;
   }
 
-  state.feedbackIssues.forEach((issue, index) => {
-    const item = document.createElement("li");
-    item.className = "issue-row";
-    item.innerHTML = `
-      <input class="issue-title" type="text" aria-label="Flagged title">
-      <input class="issue-returned" type="text" aria-label="Returned page">
-      <input class="issue-correct" type="text" aria-label="Correct page">
-      <button class="remove-issue" type="button" aria-label="Remove flagged row">x</button>
-    `;
-    item.querySelector(".issue-title").value = issue.title || "";
-    item.querySelector(".issue-returned").value = issue.returned_page || "";
-    item.querySelector(".issue-correct").value = issue.correct_page || "";
-    item.querySelector(".issue-title").addEventListener("input", (event) => {
-      state.feedbackIssues[index].title = event.target.value;
-    });
-    item.querySelector(".issue-returned").addEventListener("input", (event) => {
-      state.feedbackIssues[index].returned_page = event.target.value;
-    });
-    item.querySelector(".issue-correct").addEventListener("input", (event) => {
-      state.feedbackIssues[index].correct_page = event.target.value;
-    });
-    item.querySelector(".remove-issue").addEventListener("click", () => {
-      state.feedbackIssues.splice(index, 1);
-      renderFeedbackIssues();
-      refreshDebug();
-    });
-    els.feedbackIssues.appendChild(item);
-  });
-  syncFlagButtons();
-}
-
-function flagEntryRow(row) {
-  const title = row.querySelector(".entry-title").value.trim();
-  const currentPage = row.querySelector(".entry-page").value.trim();
-  const originalPage = row.dataset.originalPage || currentPage;
-  const existing = state.feedbackIssues.find((issue) => issue.title === title && issue.returned_page === originalPage);
-  if (existing) {
-    existing.correct_page = currentPage;
-  } else {
-    state.feedbackIssues.push({
-      issue_type: "wrong_page",
-      title,
-      returned_page: originalPage,
-      correct_page: currentPage,
-      note: "",
-    });
+  const messages = [];
+  if (missingPages) {
+    messages.push(`${missingPages} bookmark${missingPages === 1 ? " has" : "s have"} no page number.`);
   }
-  if (!state.feedbackOutcome) setFeedbackOutcome("wrong_pages");
-  renderFeedbackIssues();
-}
+  if (missingTitles) {
+    messages.push(`${missingTitles} bookmark${missingTitles === 1 ? " has" : "s have"} no title.`);
+  }
+  if (invalidLevels) {
+    messages.push(`${invalidLevels} bookmark level${invalidLevels === 1 ? " is" : "s are"} invalid.`);
+  }
+  if (analysis.recovered_execution_failure?.status === "failed") {
+    messages.push("Analysis stopped early, but the recovered bookmarks remain editable.");
+  }
 
-function setFeedbackOutcome(outcome) {
-  state.feedbackOutcome = outcome || "";
-  document.querySelectorAll("#feedback-options button").forEach((button) => {
-    button.classList.toggle("active", button.dataset.outcome === state.feedbackOutcome);
+  const reasons = [
+    ...(Array.isArray(analysis.publishability?.reasons) ? analysis.publishability.reasons : []),
+    ...(Array.isArray(analysis.review_reasons) ? analysis.review_reasons : []),
+  ];
+  reasons.map(humanReviewReason).filter(Boolean).forEach((message) => {
+    if (!messages.includes(message)) messages.push(message);
   });
-}
 
-function feedbackResultSummary() {
-  const analysis = state.analysis || {};
-  const usage = analysis.gemini_usage || {};
-  return {
-    entries: getEntriesFromTable().length,
-    original_entries: Array.isArray(analysis.entries) ? analysis.entries.length : 0,
-    notes: analysis.notes || "",
-    alignment_source: analysis.alignment_source || "",
-    alignment_confidence: analysis.alignment_confidence || "",
-    route: routeSummary(analysis),
-    total_token_count: Number(usage.tokens?.total_token_count || 0),
-    calls: Number(usage.calls || 0),
-    images: Number(usage.images || 0),
-    wall_ms: Number(usage.wall_ms || 0),
-  };
-}
-
-async function saveRunFeedback() {
-  const runId = currentRunId();
-  if (!runId) throw new Error("No completed run is available.");
-  const password = requireStaffPassword();
-  const response = await fetch(`${WORKER_URL}/toc/run-feedback`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      password,
-      run_id: runId,
-      outcome: state.feedbackOutcome || (state.feedbackIssues.length ? "wrong_pages" : "good"),
-      note: els.feedbackNote.value.trim(),
-      issues: state.feedbackIssues,
-      edited_entries: getEntriesFromTable(),
-      result_summary: feedbackResultSummary(),
-    }),
-  });
-  const result = await parseJsonResponse(response, "Worker");
-  if (!result.ok) throw new Error(result.error || "Feedback was not saved.");
-  setFeedbackState("Feedback saved and submitted.", "saved");
-  addProgress(`Feedback saved for run ${runId.slice(0, 12)}.`);
-  return result;
+  if (!messages.length) {
+    messages.push("The analysis found uncertainty that needs a quick check.");
+  }
+  els.reviewNotice.innerHTML = `<strong>Review needed:</strong> ${messages.join(" ")}`;
+  els.reviewNotice.hidden = false;
 }
 
 async function saveAutomaticFinalization(finalizationId, finalEntries, pdfGeneration, finalizedAt) {
@@ -1563,14 +1486,13 @@ function setEntries(entries, analysisContext = {}) {
   (entries || []).forEach((entry) => addEntryRow(entry, analysisContext));
   updateEssayOrderControl(entries, analysisContext);
   updateEntryCount();
+  updateReviewNotice();
 }
 
 function iconSvg(name) {
   const icons = {
     eye: '<svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M2.06 12.35a1 1 0 0 1 0-.7C3.42 7.58 7.25 5 12 5s8.58 2.58 9.94 6.65a1 1 0 0 1 0 .7C20.58 16.42 16.75 19 12 19s-8.58-2.58-9.94-6.65Z"></path><circle cx="12" cy="12" r="3"></circle></svg>',
-    flag: '<svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22V4"></path><path d="M4 4h12l-1 4 1 4H4"></path></svg>',
-    up: '<svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m6 15 6-6 6 6"></path></svg>',
-    down: '<svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m6 9 6 6 6-6"></path></svg>',
+    grip: '<svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M5 7h14"></path><path d="M5 12h14"></path><path d="M5 17h14"></path></svg>',
   };
   return icons[name] || "";
 }
@@ -1583,9 +1505,7 @@ function addEntryRow(entry = {}, analysisContext = {}) {
     <td class="level-cell"><input class="entry-level" type="number" min="0" step="1"></td>
     <td class="row-actions">
       <button class="preview-row" type="button" aria-label="Preview row" title="Preview row">${iconSvg("eye")}</button>
-      <button class="flag-row" type="button" aria-label="Flag row" title="Flag row">${iconSvg("flag")}</button>
-      <button class="move-row-up" type="button" aria-label="Move row up" title="Move row up">${iconSvg("up")}</button>
-      <button class="move-row-down" type="button" aria-label="Move row down" title="Move row down">${iconSvg("down")}</button>
+      <button class="drag-row" type="button" aria-label="Drag to reorder bookmark" title="Drag to reorder bookmark">${iconSvg("grip")}</button>
       <button class="remove-row" type="button" aria-label="Remove row" title="Remove row">x</button>
     </td>
   `;
@@ -1629,21 +1549,54 @@ function addEntryRow(entry = {}, analysisContext = {}) {
       requestAnimationFrame(restoreScroll);
     }
   });
-  row.querySelector(".flag-row").addEventListener("click", () => {
-    flagEntryRow(row);
+  const dragHandle = row.querySelector(".drag-row");
+  const finishMouseDrag = () => {
+    if (state.draggedEntryRow !== row) return;
+    document.removeEventListener("mousemove", moveMouseDrag);
+    window.removeEventListener("blur", finishMouseDrag);
+    row.classList.remove("dragging");
+    state.draggedEntryRow = null;
+    updateEntryCount();
+    updateCreatePdfAvailability();
+    refreshDebug();
+  };
+  const moveMouseDrag = (event) => {
+    if (state.draggedEntryRow !== row) return;
+    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest("tr");
+    if (!target || target === row || target.parentElement !== els.entriesBody) return;
+    const bounds = target.getBoundingClientRect();
+    const placeAfter = event.clientY >= bounds.top + bounds.height / 2;
+    els.entriesBody.insertBefore(row, placeAfter ? target.nextElementSibling : target);
+  };
+  dragHandle.addEventListener("mousedown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    state.draggedEntryRow = row;
+    row.classList.add("dragging");
+    document.addEventListener("mousemove", moveMouseDrag);
+    document.addEventListener("mouseup", finishMouseDrag, { once: true });
+    window.addEventListener("blur", finishMouseDrag, { once: true });
+  });
+  dragHandle.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      finishMouseDrag();
+      return;
+    }
+    if (event.key === "ArrowUp" && row.previousElementSibling) {
+      event.preventDefault();
+      row.parentNode.insertBefore(row, row.previousElementSibling);
+    } else if (event.key === "ArrowDown" && row.nextElementSibling) {
+      event.preventDefault();
+      row.parentNode.insertBefore(row.nextElementSibling, row);
+    } else {
+      return;
+    }
+    updateCreatePdfAvailability();
     refreshDebug();
   });
   row.querySelector(".remove-row").addEventListener("click", () => {
     row.remove();
     updateEntryCount();
-    updateCreatePdfAvailability();
-  });
-  row.querySelector(".move-row-up").addEventListener("click", () => {
-    if (row.previousElementSibling) row.parentNode.insertBefore(row, row.previousElementSibling);
-    updateCreatePdfAvailability();
-  });
-  row.querySelector(".move-row-down").addEventListener("click", () => {
-    if (row.nextElementSibling) row.parentNode.insertBefore(row.nextElementSibling, row);
     updateCreatePdfAvailability();
   });
   els.entriesBody.appendChild(row);
@@ -1674,6 +1627,7 @@ function visibleEditorRowsAreValid() {
 function updateCreatePdfAvailability() {
   const sourceLoaded = Boolean(state.pdfBytes || state.previewDoc || state.pdfBytesUrl);
   els.createPdf.disabled = !(sourceLoaded && visibleEditorRowsAreValid());
+  if (typeof updateReviewNotice === "function") updateReviewNotice();
 }
 
 function romanToInt(value) {
@@ -1795,8 +1749,6 @@ function buildDebugBundle() {
     `alignment_source=${analysis.alignment_source || ""}`,
     `alignment_confidence=${analysis.alignment_confidence || ""}`,
     `total_token_count=${usage.tokens?.total_token_count || ""}`,
-    `feedback_outcome=${state.feedbackOutcome || ""}`,
-    `flagged_issues=${state.feedbackIssues.length}`,
     `notes=${analysis.notes || ""}`,
     "",
     "progress:",
@@ -1842,7 +1794,6 @@ async function resetForNextPdf() {
   els.debugOutput.value = "";
   els.jsonOutput.value = "";
   els.loadPreview.disabled = false;
-  resetFeedbackState();
   updateFilenamePreview();
   updateSourceLink();
   await resetPreview("Paste a Dropbox PDF link to preview it.");
@@ -1854,7 +1805,6 @@ async function runAnalysis(event) {
   const runId = state.analysisRunId + 1;
   state.analysisRunId = runId;
   resetProgress("Preparing PDF analysis...");
-  resetFeedbackState();
   els.createPdf.disabled = true;
   els.downloadState.textContent = "Starting";
   try {
@@ -1892,12 +1842,14 @@ async function runAnalysis(event) {
     const entryCount = getEntriesFromTable().length;
     els.downloadState.textContent = recoveredFailure
       ? "Recovered bookmarks — analysis stopped"
-      : needsReview ? "Ready for review PDF" : "Ready to create PDF";
+      : needsReview ? "Ready to create PDF — review noted" : "Ready to create PDF";
     updateCreatePdfAvailability();
     addProgress(recoveredFailure
       ? `Analysis stopped after recovering ${entryCount} editable entries: ${recoveredFailure.warning}`
       : needsReview
-      ? `Analysis complete: ${getEntriesFromTable().length} entries; review required.`
+      ? entryCount
+        ? `Analysis complete: ${entryCount} editable entries; review details are shown above.`
+        : "Analysis complete: 0 entries; review required; review details are shown above."
       : `Analysis complete: ${getEntriesFromTable().length} entries.`);
     syncProgressMessages(state.analysis.progress || []);
     await metadataPromise;
@@ -2030,47 +1982,6 @@ document.addEventListener("DOMContentLoaded", () => {
     setEssayOrderMode(button.dataset.essayOrder);
   });
 
-  els.feedbackOptions.addEventListener("click", (event) => {
-    const button = event.target.closest("button[data-outcome]");
-    if (!button) return;
-    setFeedbackOutcome(button.dataset.outcome);
-    refreshDebug();
-  });
-
-  els.clearFeedbackIssues.addEventListener("click", () => {
-    state.feedbackIssues = [];
-    renderFeedbackIssues();
-    refreshDebug();
-  });
-
-  els.saveFeedback.addEventListener("click", async () => {
-    if (state.feedbackSaveTimer) {
-      clearTimeout(state.feedbackSaveTimer);
-      state.feedbackSaveTimer = null;
-    }
-    els.saveFeedback.disabled = true;
-    els.saveFeedback.textContent = "Saving...";
-    setFeedbackState("Saving feedback...", "saving");
-    try {
-      await saveRunFeedback();
-      els.saveFeedback.textContent = "Saved";
-      state.feedbackSaveTimer = setTimeout(() => {
-        els.saveFeedback.textContent = "Save feedback";
-        els.saveFeedback.disabled = !currentRunId();
-        state.feedbackSaveTimer = null;
-      }, 2500);
-    } catch (error) {
-      els.saveFeedback.textContent = "Save failed";
-      setFeedbackState("Feedback save failed.", "error");
-      addProgress(`Feedback error: ${error.message}`);
-      state.feedbackSaveTimer = setTimeout(() => {
-        els.saveFeedback.textContent = "Save feedback";
-        els.saveFeedback.disabled = !currentRunId();
-        state.feedbackSaveTimer = null;
-      }, 2500);
-    }
-  });
-
   els.createPdf.addEventListener("click", async () => {
     els.downloadState.textContent = "Creating PDF";
     addProgress("Creating bookmarked PDF in browser...");
@@ -2116,7 +2027,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   updateFilenamePreview();
   updateSourceLink();
-  resetFeedbackState();
   setEssayOrderMode("keep_source", { applyToRows: false });
   updatePreviewControls();
 });
