@@ -1332,6 +1332,18 @@ async function analyzeSource(runId) {
       if (!latest.result) throw new Error("Analysis job finished without a result.");
       return latest.result;
     }
+    if (latest.status === "failed" && Array.isArray(latest.result?.entries)
+        && latest.result.entries.length > 0) {
+      syncProgressMessages(latest.progress || []);
+      updateJobStatusText(latest.status);
+      return {
+        ...latest.result,
+        recovered_execution_failure: {
+          status: "failed",
+          warning: latest.error || "Analysis stopped after recovering editable bookmark rows.",
+        },
+      };
+    }
     if (latest.status === "failed" || latest.status === "failed_quality_gate" || latest.status === "cancelled") {
       syncProgressMessages(latest.progress || []);
       updateJobStatusText(latest.status);
@@ -1619,6 +1631,7 @@ function addEntryRow(entry = {}, analysisContext = {}) {
   row.querySelector(".remove-row").addEventListener("click", () => {
     row.remove();
     updateEntryCount();
+    updateCreatePdfAvailability();
   });
   els.entriesBody.appendChild(row);
 }
@@ -1633,6 +1646,10 @@ function getEntriesFromTable() {
 
 function updateEntryCount() {
   els.entryCount.textContent = String(getEntriesFromTable().length);
+}
+
+function updateCreatePdfAvailability() {
+  els.createPdf.disabled = !state.analysis || getEntriesFromTable().length === 0;
 }
 
 function romanToInt(value) {
@@ -1845,10 +1862,17 @@ async function runAnalysis(event) {
     els.alignmentStatus.textContent = `${state.analysis.alignment_source || "unknown"} / ${state.analysis.alignment_confidence || "unknown"}`;
     updateLearningPanel();
     const needsReview = state.analysis.quality_gate === "needs_review"
-      || state.analysis.publishability?.job_status === "needs_review";
-    els.downloadState.textContent = needsReview ? "Ready for review PDF" : "Ready to create PDF";
-    els.createPdf.disabled = false;
-    addProgress(needsReview
+      || state.analysis.publishability?.job_status === "needs_review"
+      || state.analysis.recovered_execution_failure?.status === "failed";
+    const recoveredFailure = state.analysis.recovered_execution_failure;
+    const entryCount = getEntriesFromTable().length;
+    els.downloadState.textContent = recoveredFailure
+      ? "Recovered bookmarks — analysis stopped"
+      : needsReview ? "Ready for review PDF" : "Ready to create PDF";
+    updateCreatePdfAvailability();
+    addProgress(recoveredFailure
+      ? `Analysis stopped after recovering ${entryCount} editable entries: ${recoveredFailure.warning}`
+      : needsReview
       ? `Analysis complete: ${getEntriesFromTable().length} entries; review required.`
       : `Analysis complete: ${getEntriesFromTable().length} entries.`);
     syncProgressMessages(state.analysis.progress || []);
@@ -1963,6 +1987,7 @@ document.addEventListener("DOMContentLoaded", () => {
   els.addEntry.addEventListener("click", () => {
     addEntryRow({ title: "", page: "", level: 0 }, state.analysis || {});
     updateEntryCount();
+    updateCreatePdfAvailability();
     refreshDebug();
   });
 
@@ -1971,6 +1996,7 @@ document.addEventListener("DOMContentLoaded", () => {
       event.target.closest("tr").dataset.manualTitleEdited = "true";
     }
     updateEntryCount();
+    updateCreatePdfAvailability();
     refreshDebug();
   });
 
