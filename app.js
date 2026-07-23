@@ -1017,6 +1017,7 @@ async function loadPreviewDocument(targetPage = 1) {
     state.previewPageCount = state.previewDoc.numPages;
     await renderPreviewPage(targetPage);
     addProgress(`PDF preview loaded (${state.previewPageCount} pages).`);
+    updateCreatePdfAvailability();
   } finally {
     els.loadPreview.disabled = false;
   }
@@ -1332,14 +1333,14 @@ async function analyzeSource(runId) {
       if (!latest.result) throw new Error("Analysis job finished without a result.");
       return latest.result;
     }
-    if (latest.status === "failed" && Array.isArray(latest.result?.entries)
-        && latest.result.entries.length > 0) {
+    if ((latest.status === "failed" || latest.status === "failed_quality_gate")
+        && latest.result && Array.isArray(latest.result.entries)) {
       syncProgressMessages(latest.progress || []);
       updateJobStatusText(latest.status);
       return {
         ...latest.result,
         recovered_execution_failure: {
-          status: "failed",
+          status: latest.status,
           warning: latest.error || "Analysis stopped after recovering editable bookmark rows.",
         },
       };
@@ -1568,6 +1569,8 @@ function iconSvg(name) {
   const icons = {
     eye: '<svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M2.06 12.35a1 1 0 0 1 0-.7C3.42 7.58 7.25 5 12 5s8.58 2.58 9.94 6.65a1 1 0 0 1 0 .7C20.58 16.42 16.75 19 12 19s-8.58-2.58-9.94-6.65Z"></path><circle cx="12" cy="12" r="3"></circle></svg>',
     flag: '<svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22V4"></path><path d="M4 4h12l-1 4 1 4H4"></path></svg>',
+    up: '<svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m6 15 6-6 6 6"></path></svg>',
+    down: '<svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m6 9 6 6 6-6"></path></svg>',
   };
   return icons[name] || "";
 }
@@ -1581,6 +1584,8 @@ function addEntryRow(entry = {}, analysisContext = {}) {
     <td class="row-actions">
       <button class="preview-row" type="button" aria-label="Preview row" title="Preview row">${iconSvg("eye")}</button>
       <button class="flag-row" type="button" aria-label="Flag row" title="Flag row">${iconSvg("flag")}</button>
+      <button class="move-row-up" type="button" aria-label="Move row up" title="Move row up">${iconSvg("up")}</button>
+      <button class="move-row-down" type="button" aria-label="Move row down" title="Move row down">${iconSvg("down")}</button>
       <button class="remove-row" type="button" aria-label="Remove row" title="Remove row">x</button>
     </td>
   `;
@@ -1633,23 +1638,42 @@ function addEntryRow(entry = {}, analysisContext = {}) {
     updateEntryCount();
     updateCreatePdfAvailability();
   });
+  row.querySelector(".move-row-up").addEventListener("click", () => {
+    if (row.previousElementSibling) row.parentNode.insertBefore(row, row.previousElementSibling);
+    updateCreatePdfAvailability();
+  });
+  row.querySelector(".move-row-down").addEventListener("click", () => {
+    if (row.nextElementSibling) row.parentNode.insertBefore(row.nextElementSibling, row);
+    updateCreatePdfAvailability();
+  });
   els.entriesBody.appendChild(row);
 }
 
-function getEntriesFromTable() {
+function getVisibleEditorRows() {
   return [...els.entriesBody.querySelectorAll("tr")]
     .map((row) => learningEntryFromValues(row.querySelector(".entry-title").value,
       row.querySelector(".entry-page").value, row.querySelector(".entry-level").value,
-      row.dataset.learningId, row.dataset.parentIdentity))
-    .filter((entry) => entry.title && entry.page);
+      row.dataset.learningId, row.dataset.parentIdentity));
+}
+
+function getEntriesFromTable() {
+  return getVisibleEditorRows().filter((entry) => entry.title && entry.page);
 }
 
 function updateEntryCount() {
-  els.entryCount.textContent = String(getEntriesFromTable().length);
+  els.entryCount.textContent = String(getVisibleEditorRows().length);
+}
+
+function visibleEditorRowsAreValid() {
+  const rows = getVisibleEditorRows();
+  return rows.length > 0 && rows.every((entry) =>
+    Boolean(entry.title) && Boolean(entry.page)
+      && Number.isInteger(entry.level) && entry.level >= 0);
 }
 
 function updateCreatePdfAvailability() {
-  els.createPdf.disabled = !state.analysis || getEntriesFromTable().length === 0;
+  const sourceLoaded = Boolean(state.pdfBytes || state.previewDoc || state.pdfBytesUrl);
+  els.createPdf.disabled = !(sourceLoaded && visibleEditorRowsAreValid());
 }
 
 function romanToInt(value) {
