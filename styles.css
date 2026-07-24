@@ -202,28 +202,6 @@ textarea:focus {
   flex-wrap: wrap;
 }
 
-.book-bars {
-  min-height: 106px;
-  border-bottom: 10px solid #838383;
-  background:
-    linear-gradient(
-      90deg,
-      #5a2d07 0 14px,
-      #ffc05a 14px 30px,
-      #5aa9ca 30px 46px,
-      #9a1242 46px 74px,
-      #4a7f38 74px 88px,
-      #092d67 88px 104px,
-      #5aa9ca 104px 122px,
-      #243073 122px 138px,
-      #ffc05a 138px 156px,
-      #be141a 156px 174px,
-      #21110a 174px 188px,
-      #0e1f69 188px 212px
-    );
-  background-size: 212px 100%;
-}
-
 .workspace {
   width: min(1440px, calc(100vw - 48px));
   margin: 74px auto 90px;
