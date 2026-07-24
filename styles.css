@@ -204,7 +204,7 @@ textarea:focus {
 
 .workspace {
   width: min(1440px, calc(100vw - 48px));
-  margin: 74px auto 90px;
+  margin: 24px auto 90px;
   display: grid;
   grid-template-columns: minmax(420px, 580px) minmax(520px, 1fr);
   gap: 24px;
@@ -878,6 +878,44 @@ textarea {
   .preview-status {
     justify-self: start;
     text-align: left;
+  }
+
+  .table-wrap {
+    overflow-x: hidden;
+  }
+
+  th,
+  td {
+    padding: 6px 5px;
+  }
+
+  th:nth-child(2),
+  .page-cell {
+    width: 82px;
+  }
+
+  th:nth-child(3),
+  .row-actions {
+    width: 96px;
+  }
+
+  .row-actions {
+    gap: 4px;
+  }
+
+  .preview-row,
+  .drag-row,
+  .remove-row {
+    width: 28px;
+    min-width: 28px;
+    min-height: 30px;
+    border-radius: 5px;
+  }
+
+  .preview-row svg,
+  .drag-row svg {
+    width: 15px;
+    height: 15px;
   }
 
   .preview-toolbar {
