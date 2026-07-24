@@ -903,7 +903,7 @@ async function renderPreviewPage(pageNumber) {
   await page.render({ canvasContext: context, viewport }).promise;
   els.previewCanvas.hidden = false;
   els.previewEmpty.hidden = true;
-  setPreviewStatus(`Showing page ${safePage} of ${state.previewPageCount}.`, "ok");
+  setPreviewStatus("", "ok");
   updatePreviewControls();
 }
 
