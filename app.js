@@ -1502,8 +1502,8 @@ function addEntryRow(entry = {}, analysisContext = {}) {
   row.innerHTML = `
     <td><input class="entry-title" type="text"></td>
     <td class="page-cell"><input class="entry-page" type="text"></td>
-    <td class="level-cell"><input class="entry-level" type="number" min="0" step="1"></td>
     <td class="row-actions">
+      <input class="entry-level" type="hidden" value="0">
       <button class="preview-row" type="button" aria-label="Preview row" title="Preview row">${iconSvg("eye")}</button>
       <button class="drag-row" type="button" aria-label="Drag to reorder bookmark" title="Drag to reorder bookmark">${iconSvg("grip")}</button>
       <button class="remove-row" type="button" aria-label="Remove row" title="Remove row">x</button>
