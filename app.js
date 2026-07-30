@@ -52,6 +52,7 @@ const state = {
   previewLoadId: 0,
   pdfBytesUrl: "",
   analysisRunId: 0,
+  lastDeletedEntry: null,
   metadataSuggestion: null,
   metadataTouched: new Set(),
   metadataAutoValues: {},
@@ -107,6 +108,7 @@ const els = {
   downloadState: $("download-state"),
   createPdf: $("create-pdf"),
   addEntry: $("add-entry"),
+  undoDeleteEntry: $("undo-delete-entry"),
   debugOutput: $("debug-output"),
   jsonOutput: $("json-output"),
   filenamePreview: $("filename-preview"),
@@ -1482,11 +1484,33 @@ function setEssayOrderMode(mode, { applyToRows = true } = {}) {
 }
 
 function setEntries(entries, analysisContext = {}) {
+  state.lastDeletedEntry = null;
+  updateUndoDeleteAvailability();
   els.entriesBody.innerHTML = "";
   (entries || []).forEach((entry) => addEntryRow(entry, analysisContext));
   updateEssayOrderControl(entries, analysisContext);
   updateEntryCount();
   updateReviewNotice();
+}
+
+function updateUndoDeleteAvailability() {
+  const canUndo = Boolean(state.lastDeletedEntry?.row);
+  els.undoDeleteEntry.hidden = !canUndo;
+  els.undoDeleteEntry.disabled = !canUndo;
+}
+
+function undoDeletedEntry() {
+  const deleted = state.lastDeletedEntry;
+  if (!deleted?.row) return;
+  const before = deleted.nextSibling?.parentElement === els.entriesBody
+    ? deleted.nextSibling
+    : null;
+  els.entriesBody.insertBefore(deleted.row, before);
+  state.lastDeletedEntry = null;
+  updateUndoDeleteAvailability();
+  updateEntryCount();
+  updateCreatePdfAvailability();
+  refreshDebug();
 }
 
 function iconSvg(name) {
@@ -1595,9 +1619,12 @@ function addEntryRow(entry = {}, analysisContext = {}) {
     refreshDebug();
   });
   row.querySelector(".remove-row").addEventListener("click", () => {
+    state.lastDeletedEntry = { row, nextSibling: row.nextElementSibling };
     row.remove();
+    updateUndoDeleteAvailability();
     updateEntryCount();
     updateCreatePdfAvailability();
+    refreshDebug();
   });
   els.entriesBody.appendChild(row);
 }
@@ -1966,6 +1993,8 @@ document.addEventListener("DOMContentLoaded", () => {
     updateCreatePdfAvailability();
     refreshDebug();
   });
+
+  els.undoDeleteEntry.addEventListener("click", undoDeletedEntry);
 
   els.entriesBody.addEventListener("input", (event) => {
     if (event.target.classList.contains("entry-title")) {
