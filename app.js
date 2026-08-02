@@ -210,12 +210,47 @@ function setActiveAnalysisJobId(jobId, runId) {
   renderRunId();
 }
 
-function routeSummary(analysis = state.analysis) {
-  const progress = Array.isArray(analysis?.progress) ? analysis.progress.join("\n").toLowerCase() : "";
-  if (progress.includes("skipping front toc scan")) return "back first, front skipped";
-  if (progress.includes("toc found in back pages")) return "back ToC";
-  if (progress.includes("toc found in front pages")) return "front ToC";
-  return analysis ? "unknown" : "not run";
+function outputStatus(analysis = state.analysis) {
+  return analysis?.publishability?.output_status || {};
+}
+
+function pathProvenance(analysis = state.analysis) {
+  return analysis?.direct_toc_diagnostics?.path_provenance || {};
+}
+
+function pathDisplayLabel(analysis = state.analysis) {
+  if (!analysis) return "not run";
+  const provenance = pathProvenance(analysis);
+  const message = String(provenance.status_message || "").trim();
+  if (message) return message;
+  switch (String(provenance.analysis_path || "").trim()) {
+    case "premium_whole_toc":
+      return "Premium path used";
+    case "protected_good_enough_fallback":
+      return "Review fallback used — editable ToC evidence preserved";
+    case "mixed_premium_review":
+      return "Mixed review path — review required";
+    case "failed_no_safe_output":
+      return "No safe ToC output";
+    default:
+      return "unknown";
+  }
+}
+
+function outputDisplayLabel(analysis = state.analysis) {
+  const status = outputStatus(analysis);
+  if (status.resolved_output_complete === true) return "Ready to create PDF";
+  if (status.editable_available === true && status.review_required === true) {
+    return "Ready to create PDF — review noted";
+  }
+  if (status.review_evidence_available === true) return "Review evidence available";
+  if (status.output_available === false || status.product_status === "failed") {
+    return "No safe ToC output";
+  }
+  const needsReview = analysis?.quality_gate === "needs_review"
+    || analysis?.publishability?.job_status === "needs_review"
+    || analysis?.recovered_execution_failure?.status === "failed";
+  return needsReview ? "Ready to create PDF — review noted" : "Ready to create PDF";
 }
 
 function updateLearningPanel() {
@@ -224,7 +259,7 @@ function updateLearningPanel() {
   const usage = analysis?.gemini_usage || {};
   const totalTokens = usage.tokens?.total_token_count;
   renderRunId();
-  if (els.learningRoute) els.learningRoute.textContent = routeSummary(analysis);
+  if (els.learningRoute) els.learningRoute.textContent = pathDisplayLabel(analysis);
   if (els.learningTokens) els.learningTokens.textContent = formatNumber(totalTokens);
 }
 
@@ -266,7 +301,10 @@ function updateReviewNotice() {
   const missingPages = rows.filter((entry) => !entry.page).length;
   const invalidLevels = rows.filter((entry) =>
     !Number.isInteger(entry.level) || entry.level < 0).length;
-  const needsReview = analysis.quality_gate === "needs_review"
+  const status = outputStatus(analysis);
+  const needsReview = status.review_required === true
+    || status.product_status === "needs_review"
+    || analysis.quality_gate === "needs_review"
     || analysis.publishability?.job_status === "needs_review"
     || analysis.recovered_execution_failure?.status === "failed"
     || missingTitles > 0
@@ -1762,7 +1800,8 @@ function buildDebugBundle() {
   return [
     "source=dropbox_url",
     `run_id=${currentRunId()}`,
-    `route=${routeSummary(analysis)}`,
+    `path=${pathDisplayLabel(analysis)}`,
+    `product_status=${outputStatus(analysis).product_status || ""}`,
     `pdf_name=${state.pdfName || ""}`,
     `pdf_url=${state.pdfUrl || ""}`,
     `worker=${WORKER_URL}`,
@@ -1862,14 +1901,17 @@ async function runAnalysis(event) {
     setEntries(state.analysis.entries || [], state.analysis);
     els.alignmentStatus.textContent = `${state.analysis.alignment_source || "unknown"} / ${state.analysis.alignment_confidence || "unknown"}`;
     updateLearningPanel();
-    const needsReview = state.analysis.quality_gate === "needs_review"
+    const status = outputStatus(state.analysis);
+    const needsReview = status.review_required === true
+      || status.product_status === "needs_review"
+      || state.analysis.quality_gate === "needs_review"
       || state.analysis.publishability?.job_status === "needs_review"
       || state.analysis.recovered_execution_failure?.status === "failed";
     const recoveredFailure = state.analysis.recovered_execution_failure;
     const entryCount = getEntriesFromTable().length;
     els.downloadState.textContent = recoveredFailure
       ? "Recovered bookmarks — analysis stopped"
-      : needsReview ? "Ready to create PDF — review noted" : "Ready to create PDF";
+      : outputDisplayLabel(state.analysis);
     updateCreatePdfAvailability();
     addProgress(recoveredFailure
       ? `Analysis stopped after recovering ${entryCount} editable entries: ${recoveredFailure.warning}`

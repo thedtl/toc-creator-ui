@@ -38,7 +38,11 @@ function functionSource(name) {
 function compile(name, dependencies) {
   const names = Object.keys(dependencies);
   const values = Object.values(dependencies);
-  return new Function(...names, `${functionSource(name)}; return ${name};`)(...values);
+  return new Function(...names, `${functionSource("outputStatus")}
+${functionSource("pathProvenance")}
+${functionSource("pathDisplayLabel")}
+${functionSource("outputDisplayLabel")}
+${functionSource(name)}; return ${name};`)(...values);
 }
 
 function entries(count = 13) {
@@ -203,12 +207,12 @@ assert.equal(renderedZero.els.createPdf.disabled, true);
 assert.match(renderedZero.progress.join("\n"), /0 entries; review required/);
 
 const manualRows = [];
-const manualState = { analysis: zero };
+const manualState = { analysis: zero, pdfBytes: new Uint8Array([1]), previewDoc: null, pdfBytesUrl: "" };
 const manualEls = { createPdf: { disabled: true } };
 const updateCreatePdfAvailability = compile("updateCreatePdfAvailability", {
   state: manualState,
   els: manualEls,
-  getEntriesFromTable: () => manualRows,
+  visibleEditorRowsAreValid: () => manualRows.length > 0,
 });
 updateCreatePdfAvailability();
 assert.equal(manualEls.createPdf.disabled, true);

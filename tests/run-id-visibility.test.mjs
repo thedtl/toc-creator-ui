@@ -24,7 +24,7 @@ function loadHarness() {
   vm.createContext(context);
   vm.runInContext(`${section("function createStaleAnalysisError", "if (window.pdfjsLib)")}
     ${section("function elapsedSeconds", "function formatNumber")}
-    ${section("function currentRunId", "function routeSummary")}
+    ${section("function currentRunId", "function outputStatus")}
     this.api = { currentRunId, renderRunId, setActiveAnalysisJobId, updateJobStatusText };`, context);
   return { context, api: context.api, runIdNode, copyButton, downloadState };
 }
@@ -83,6 +83,6 @@ test("markup and marker expose the full ID with the generic copy mechanism", () 
   assert.match(html, /Run ID: <strong id="learning-run-id">none<\/strong>/);
   assert.match(html, /id="copy-run-id"[^>]+data-copy-target="learning-run-id"/);
   assert.match(source, /LEARNING_FRONTEND_VERSION = "20260718-failed-run-id"/);
-  assert.match(html, /app\.js\?v=20260718-failed-run-id/);
+  assert.match(html, /app\.js\?v=20260731-path-provenance-display/);
   assert.doesNotMatch(section("function renderRunId", "function setActiveAnalysisJobId"), /slice\(/);
 });

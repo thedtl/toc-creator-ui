@@ -6,7 +6,7 @@ import vm from "node:vm";
 const source = fs.readFileSync(new URL("../app.js", import.meta.url), "utf8");
 const prefix = source.slice(0, source.indexOf("const state ="));
 const essayFunctions = source.slice(source.indexOf("function analysisUsesEditedVolumeTitles"), source.indexOf("function iconSvg"));
-const tableFunction = source.slice(source.indexOf("function getEntriesFromTable"), source.indexOf("function updateEntryCount"));
+const tableFunction = source.slice(source.indexOf("function getVisibleEditorRows"), source.indexOf("function updateEntryCount"));
 
 function makeRow(entry, format) {
   const title = { value: format(entry, { document_type: "edited_volume" }, "keep_source") };
@@ -99,7 +99,7 @@ test("capture is nonblocking and retries only one transport failure", async () =
 test("combined marker and immutable-finalization wiring are synchronized", () => {
   const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
   assert.match(source, /LEARNING_FRONTEND_VERSION = "20260718-failed-run-id"/);
-  assert.match(html, /app\.js\?v=20260718-failed-run-id/);
+  assert.match(html, /app\.js\?v=20260731-path-provenance-display/);
   assert.match(source, /row\.dataset\.learningId = entry\.learning_id \|\| entry\.identity/);
   assert.match(source, /original_source_url: originalSourceUrl/);
   assert.match(source, /result\?\.entries \|\| getEntriesFromTable\(\)/);
