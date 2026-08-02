@@ -1841,7 +1841,7 @@ async function resetForNextPdf() {
   state.analysis = null;
   state.analysisJobId = null;
   state.analysisJobStartedAt = null;
-  renderRunId();
+  updateLearningPanel();
   state.metadataSuggestion = null;
   clearMetadataTracking();
   state.lastProgressCount = 0;
